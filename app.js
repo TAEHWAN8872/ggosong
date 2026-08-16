@@ -257,11 +257,16 @@ function parseOldFormatMonth(grid, ranges) {
 
   const CAT = 1, ITEM = 2, AMT = 4; // 분류, 제목, 금액(실제) — B, C, E열
 
-  // 수입: "월급" 행은 지출 범위 밖에 있을 수 있으므로 표 전체를 훑어서 찾음
-  for (let r = 0; r < grid.length; r++) {
-    const row = grid[r] || [];
-    if (trimStr(row[CAT]) === "월급") {
-      out.income += toNum(row[AMT]);
+  // 수입: 구형 포맷(1~5월) 공통으로 F5 셀에 월급 금액이 들어있음
+  out.income = toNum(cell(grid, 4, 5)); // 시트상 F5 (0-indexed: row 4, col 5)
+
+  // 혹시 F5가 비어있는 달이 있을 경우를 대비해 "월급" 라벨 행도 폴백으로 훑음
+  if (!out.income) {
+    for (let r = 0; r < grid.length; r++) {
+      const row = grid[r] || [];
+      if (trimStr(row[CAT]) === "월급") {
+        out.income += toNum(row[AMT]);
+      }
     }
   }
 
