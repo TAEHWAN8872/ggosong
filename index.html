@@ -75,18 +75,21 @@ main{max-width:1180px; margin:0 auto; padding:22px 24px;}
 
 /* ---- 월 리본 ---- */
 .month-ribbon{
-  display:grid; grid-template-columns:repeat(8,1fr); gap:8px;
+  display:flex; gap:6px;
   margin-bottom:22px;
+  overflow-x:auto;
+  scrollbar-width:thin;
 }
 .month-tile{
+  flex:1 1 0; min-width:44px;
   background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
-  padding:14px 8px; cursor:pointer; text-align:center; transition:border-color .15s, transform .1s;
+  padding:12px 4px; cursor:pointer; text-align:center; transition:border-color .15s, transform .1s;
   box-shadow:0 1px 2px rgba(16,20,30,0.04);
   display:flex; align-items:center; justify-content:center;
 }
 .month-tile:hover{border-color:var(--accent); transform:translateY(-1px);}
 .month-tile.active{border-color:var(--income); background:var(--surface-2);}
-.month-tile .m-label{font-size:13px; color:var(--text); font-weight:600;}
+.month-tile .m-label{font-size:12.5px; color:var(--text); font-weight:600; white-space:nowrap;}
 .month-tile.active .m-label{color:var(--income);}
 .month-tile.empty{opacity:.35;}
 
@@ -137,7 +140,7 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
 @media (max-width: 860px){
   .kpi-grid{grid-template-columns:repeat(2,1fr);}
   .panel-grid{grid-template-columns:1fr;}
-  .month-ribbon{grid-template-columns:repeat(4,1fr);}
+  .month-tile{min-width:56px;}
 }
 </style>
 </head>
