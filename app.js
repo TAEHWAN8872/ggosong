@@ -478,7 +478,7 @@ function renderKpis(sel) {
   const rate = income ? ((savings / income) * 100).toFixed(1) : "0.0";
 
   const cards = [
-    { label: "총 수입", value: income, color: "var(--income)" },
+    { label: "총 수입", value: income, color: "var(--income)", sub: `월급 ${fmtWon(d.income || 0)} + 부업 ${fmtWon(sideIncome)}` },
     { label: "총 지출", value: expense, color: "var(--expense)" },
     { label: "저축/투자", value: savings, color: "var(--savings)", sub: `저축률 ${rate}%` },
     { label: "부업 수익", value: sideIncome, color: "var(--accent)" },
