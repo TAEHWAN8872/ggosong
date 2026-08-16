@@ -512,6 +512,30 @@ const chartDefaults = {
   font: { family: "-apple-system, sans-serif", size: 11 },
 };
 
+// 전월 대비 증감률(%)을 막대 위에 숫자로 그려주는 커스텀 플러그인
+const pctLabelPlugin = {
+  id: "pctLabels",
+  afterDatasetsDraw(chart) {
+    const opt = chart.options.plugins && chart.options.plugins.pctLabels;
+    if (!opt || !opt.values) return;
+    const meta = chart.getDatasetMeta(opt.datasetIndex);
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.font = "700 11px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.textAlign = "center";
+    meta.data.forEach((bar, i) => {
+      const v = opt.values[i];
+      if (v === null || v === undefined || !isFinite(v)) return;
+      const text = (v > 0 ? "+" : "") + v.toFixed(1) + "%";
+      ctx.fillStyle = v >= 0 ? "#2f9d6f" : "#d63653";
+      ctx.fillText(text, bar.x, bar.y - 8);
+    });
+    ctx.restore();
+  },
+};
+Chart.register(pctLabelPlugin);
+
+
 function renderTrendChart(sel) {
   destroyChart("trend");
   const titleEl = $("#trendTitleText");
@@ -579,14 +603,23 @@ function renderTrendChart(sel) {
       borderRadius: 4,
     },
   ];
+
+  let pctValues = null;
+  let curDatasetIndex = 0;
+
   if (prev) {
+    const prevData = [prevIncome, prev.expense || 0, prev.savings || 0];
     datasets.unshift({
       label: `${prevM}월`,
-      data: [prevIncome, prev.expense || 0, prev.savings || 0],
+      data: prevData,
       backgroundColor: "#c9ced9",
       borderRadius: 4,
     });
+    curDatasetIndex = 1;
+    pctValues = curData.map((v, i) => (prevData[i] ? ((v - prevData[i]) / Math.abs(prevData[i])) * 100 : null));
   }
+
+  const maxVal = Math.max(...curData, ...(prev ? [prevIncome, prev.expense || 0, prev.savings || 0] : [0]), 1);
 
   state.charts.trend = new Chart($("#trendChart"), {
     type: "bar",
@@ -594,13 +627,19 @@ function renderTrendChart(sel) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      layout: { padding: { top: 24 } },
       plugins: {
         legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
         tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtWon(ctx.raw)}` } },
+        pctLabels: { values: pctValues, datasetIndex: curDatasetIndex },
       },
       scales: {
         x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
-        y: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
+        y: {
+          grid: { color: "#e2e5eb" },
+          suggestedMax: maxVal * 1.18,
+          ticks: { color: "#6b7280", callback: (v) => fmtShort(v) },
+        },
       },
     },
   });
@@ -653,6 +692,20 @@ function renderCatChart(sel) {
         renderCatChart(sel);
       });
     });
+
+  // 항목 9개까지만 보이도록 실제 렌더링된 행 높이를 측정해 컨테이너 높이를 고정,
+  // 나머지는 스크롤로 확인 (수입/지출/저축 카드·차트 라인과 높이를 맞추기 위함)
+  const VISIBLE_ROWS = 9;
+  const rowWraps = $("#catList").querySelectorAll(".cat-row-wrap");
+  if (rowWraps.length > VISIBLE_ROWS) {
+    const gap = 6;
+    let h = 0;
+    for (let i = 0; i < VISIBLE_ROWS; i++) h += rowWraps[i].offsetHeight;
+    h += gap * (VISIBLE_ROWS - 1);
+    $("#catList").style.maxHeight = h + "px";
+  } else {
+    $("#catList").style.maxHeight = "none";
+  }
 }
 
 function renderSideChart(sel) {
