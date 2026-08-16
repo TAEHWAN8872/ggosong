@@ -649,7 +649,10 @@ const amountLabelPlugin = {
     try {
       const ctx = chart.ctx;
       const isHorizontal = chart.options.indexAxis === "y";
-      const formatter = opt.formatter || fmtShort;
+      // opt.formatter는 함수가 아니라 문자열 플래그("won")로 받음 — Chart.js는 옵션 트리에
+      // 함수가 들어있으면 "스크립터블 옵션"으로 간주해 자기 내부 컨텍스트를 인자로 넣어
+      // 먼저 호출해버리는데, 그러면 우리가 원하는 시점/인자로 호출할 수 없어 값이 깨짐
+      const formatter = opt.formatter === "won" ? fmtWon : fmtShort;
       const datasetIndexes = opt.datasets || chart.data.datasets.map((_, i) => i);
       ctx.save();
       ctx.font = "700 10.5px -apple-system, BlinkMacSystemFont, sans-serif";
@@ -1116,7 +1119,7 @@ function renderRateChart(sel) {
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: { label: (ctx) => fmtWon(ctx.raw) } },
-        amountLabels: { enabled: true, formatter: fmtWon, values: savingsValues },
+        amountLabels: { enabled: true, formatter: "won", values: savingsValues },
       },
       scales: {
         x: { grid: { color: "#e2e5eb" }, suggestedMax: maxSavingsVal * 1.25, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
@@ -1200,7 +1203,7 @@ function renderAssetPanel(sel) {
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: { label: (ctx) => fmtWon(ctx.raw) } },
-        amountLabels: { enabled: true, formatter: fmtWon, values: assetValues },
+        amountLabels: { enabled: true, formatter: "won", values: assetValues },
       },
       scales: {
         x: { grid: { color: "#e2e5eb" }, suggestedMax: maxAssetVal * 1.35, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
