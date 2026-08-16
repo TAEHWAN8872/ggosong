@@ -535,6 +535,41 @@ const pctLabelPlugin = {
 };
 Chart.register(pctLabelPlugin);
 
+// 누적 막대그래프(부업 수익 추이) 맨 위에 그 달의 합계를 숫자로 그려주는 플러그인
+const stackTotalLabelPlugin = {
+  id: "stackTotalLabels",
+  afterDatasetsDraw(chart) {
+    const opt = chart.options.plugins && chart.options.plugins.stackTotalLabels;
+    if (!opt || !opt.enabled) return;
+    const datasets = chart.data.datasets;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.font = "700 11px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#1a1d24";
+    chart.data.labels.forEach((_, i) => {
+      let total = 0;
+      let topY = null;
+      let x = null;
+      datasets.forEach((ds, dsIndex) => {
+        const val = ds.data[i] || 0;
+        total += val;
+        const meta = chart.getDatasetMeta(dsIndex);
+        if (meta.hidden) return;
+        const bar = meta.data[i];
+        if (bar && val) {
+          if (topY === null || bar.y < topY) topY = bar.y;
+          x = bar.x;
+        }
+      });
+      if (x === null || !total) return;
+      ctx.fillText(fmtShort(total), x, topY - 8);
+    });
+    ctx.restore();
+  },
+};
+Chart.register(stackTotalLabelPlugin);
+
 
 function renderTrendChart(sel) {
   destroyChart("trend");
@@ -720,27 +755,41 @@ function renderSideChart(sel) {
     const labels = CONFIG.MONTHS.map((m) => `${m}월`);
     const mk = (key) => CONFIG.MONTHS.map((m) => (side[key] ? side[key][m] || 0 : 0));
 
+    const dPurchase = mk("구매대행");
+    const dStock = mk("해외주식");
+    const dIpo = mk("공모주");
+    const dCard = mk("카테크");
+    const totals = CONFIG.MONTHS.map((_, i) => dPurchase[i] + dStock[i] + dIpo[i] + dCard[i]);
+    const maxTotal = Math.max(...totals, 1);
+
     state.charts.side = new Chart($("#sideChart"), {
       type: "bar",
       data: {
         labels,
         datasets: [
-          { label: "구매대행", data: mk("구매대행"), backgroundColor: "#4a6cc0", stack: "s" },
-          { label: "해외주식", data: mk("해외주식"), backgroundColor: "#2f9d6f", stack: "s" },
-          { label: "공모주", data: mk("공모주"), backgroundColor: "#c08a2e", stack: "s" },
-          { label: "카테크", data: mk("카테크"), backgroundColor: "#c77dff", stack: "s" },
+          { label: "구매대행", data: dPurchase, backgroundColor: "#4a6cc0", stack: "s" },
+          { label: "해외주식", data: dStock, backgroundColor: "#2f9d6f", stack: "s" },
+          { label: "공모주", data: dIpo, backgroundColor: "#c08a2e", stack: "s" },
+          { label: "카테크", data: dCard, backgroundColor: "#c77dff", stack: "s" },
         ],
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        layout: { padding: { top: 22 } },
         plugins: {
           legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
           tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtWon(ctx.raw)}` } },
+          stackTotalLabels: { enabled: true },
         },
         scales: {
           x: { stacked: true, grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
-          y: { stacked: true, grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
+          y: {
+            stacked: true,
+            suggestedMax: maxTotal * 1.18,
+            grid: { color: "#e2e5eb" },
+            ticks: { color: "#6b7280", callback: (v) => fmtShort(v) },
+          },
         },
       },
     });
