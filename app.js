@@ -175,7 +175,8 @@ function parseNewFormatMonth(grid, ranges) {
   let hRowIdx = -1;
   for (let r = 0; r < grid.length; r++) {
     const row = grid[r] || [];
-    if (trimStr(row[0]) === "항목" && trimStr(row[1]) === "항목" && row.some((v) => trimStr(v) === "카테고리")) {
+    // "항목" 헤더 셀이 A:B로 병합되어 있어 B열은 비어있음 — A열만 확인
+    if (trimStr(row[0]) === "항목" && row.some((v) => trimStr(v) === "카테고리")) {
       hRowIdx = r;
       break;
     }
@@ -219,12 +220,16 @@ function parseNewFormatMonth(grid, ranges) {
     }
 
     // 변동지출: 실제 시트 수식과 동일한 행 범위만 집계 (예: J13:J36)
+    // 카테고리(G열)는 병합 셀이라 첫 행에만 값이 있고 아래 행은 비어있음 → 바로 위 값으로 이어받음
     let varSum = 0;
     if (ranges.varRows && rightCatCol >= 0 && rightAmtCol >= 0) {
       const [r1, r2] = ranges.varRows;
+      let lastVarCat = null;
       for (let sheetRow = r1; sheetRow <= r2; sheetRow++) {
         const rr = grid[sheetRow - 1] || [];
-        const cat = trimStr(rr[rightCatCol]);
+        const rawCat = trimStr(rr[rightCatCol]);
+        if (rawCat) lastVarCat = rawCat;
+        const cat = rawCat || lastVarCat;
         const amt = toNum(rr[rightAmtCol]);
         varSum += amt;
         if (cat && amt) {
