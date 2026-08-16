@@ -4,21 +4,20 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>가계부 대시보드 · 꼬부기+송</title>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <style>
 :root{
-  --bg:#0e1015;
-  --surface:#171a22;
-  --surface-2:#1d212b;
-  --border:#262b36;
-  --text:#e9ebef;
-  --muted:#8891a3;
-  --muted-2:#5c6577;
-  --income:#57b98d;
-  --expense:#e2596b;
-  --savings:#d8a94a;
-  --accent:#6f8fd6;
+  --bg:#ffffff;
+  --surface:#ffffff;
+  --surface-2:#f4f5f7;
+  --border:#e2e5eb;
+  --text:#1a1d24;
+  --muted:#6b7280;
+  --muted-2:#9aa1af;
+  --income:#2f9d6f;
+  --expense:#d63653;
+  --savings:#c08a2e;
+  --accent:#4a6cc0;
   --radius:10px;
 }
 *{box-sizing:border-box;}
@@ -36,7 +35,7 @@ a{color:inherit;}
 /* ---- 헤더 ---- */
 header{
   position:sticky; top:0; z-index:50;
-  background:rgba(14,16,21,0.92);
+  background:rgba(255,255,255,0.92);
   backdrop-filter:blur(10px);
   border-bottom:1px solid var(--border);
   padding:14px 24px;
@@ -60,8 +59,8 @@ header{
   padding:8px 14px; border-radius:8px; font-size:13px; cursor:pointer;
   font-weight:600; transition:background .15s, border-color .15s;
 }
-.btn:hover{background:#252a35; border-color:#333a48;}
-.btn.primary{background:var(--income); color:#08130e; border-color:var(--income);}
+.btn:hover{background:#e9ebef; border-color:#c9ced9;}
+.btn.primary{background:var(--income); color:#ffffff; border-color:var(--income);}
 .btn.primary:hover{filter:brightness(1.08);}
 .btn:disabled{opacity:.45; cursor:not-allowed;}
 
@@ -82,6 +81,7 @@ main{max-width:1180px; margin:0 auto; padding:22px 24px;}
 .month-tile{
   background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
   padding:10px 8px; cursor:pointer; text-align:center; transition:border-color .15s, transform .1s;
+  box-shadow:0 1px 2px rgba(16,20,30,0.04);
 }
 .month-tile:hover{border-color:var(--accent); transform:translateY(-1px);}
 .month-tile.active{border-color:var(--income); background:var(--surface-2);}
@@ -100,6 +100,7 @@ main{max-width:1180px; margin:0 auto; padding:22px 24px;}
 .kpi-card{
   background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
   padding:16px 18px;
+  box-shadow:0 1px 3px rgba(16,20,30,0.05);
 }
 .kpi-card .label{font-size:11px; color:var(--muted); font-weight:600; display:flex; align-items:center; gap:6px;}
 .kpi-card .dot{width:7px;height:7px;border-radius:50%;}
@@ -111,6 +112,7 @@ main{max-width:1180px; margin:0 auto; padding:22px 24px;}
 .panel{
   background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
   padding:18px;
+  box-shadow:0 1px 3px rgba(16,20,30,0.05);
 }
 .panel h3{font-size:13px; margin:0 0 14px; font-weight:700; display:flex; align-items:center; justify-content:space-between;}
 .panel h3 span.tag{font-size:10px; font-weight:600; color:var(--muted-2); background:var(--surface-2); padding:3px 8px; border-radius:20px;}
@@ -147,15 +149,13 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
   <div class="header-right">
     <span id="syncStatus"></span>
     <button id="refreshBtn" class="btn hidden">↻ 새로고침</button>
-    <button id="authBtn" class="btn primary">Google로 로그인</button>
   </div>
 </header>
 
 <main>
-  <div id="gate" class="gate">
-    <h2>구글 계정으로 로그인해주세요</h2>
-    <p>이 대시보드는 구글 시트 API를 실시간으로 직접 호출합니다. 데이터는 서버에 저장되지 않고 브라우저와 구글 사이에서만 오갑니다.</p>
-    <button id="authBtn2" class="btn primary">Google로 로그인</button>
+  <div id="gate" class="gate hidden">
+    <h2>데이터를 불러오지 못했어요</h2>
+    <p>구글 시트 공유 설정 또는 API 키를 확인해주세요.</p>
   </div>
 
   <div id="app" class="hidden">

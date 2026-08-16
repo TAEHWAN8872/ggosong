@@ -2,8 +2,6 @@
 // 상태
 // ============================================
 const state = {
-  accessToken: null,
-  tokenClient: null,
   monthly: {},      // { 1: {income, expense, savings, categories:{}}, ... }
   side: null,        // { months:[...], categories:{...} }
   selectedMonth: 8,
@@ -20,57 +18,17 @@ const fmtShort = (n) => {
 };
 
 // ============================================
-// 인증 (Google Identity Services)
+// 초기 진입 (로그인 없이 바로 로드)
 // ============================================
-function initAuth() {
-  state.tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CONFIG.CLIENT_ID,
-    scope: CONFIG.SCOPES,
-    callback: (resp) => {
-      if (resp.error) {
-        setSyncStatus("로그인 실패: " + resp.error);
-        return;
-      }
-      state.accessToken = resp.access_token;
-      sessionStorage.setItem("gsheet_token", resp.access_token);
-      onSignedIn();
-    },
-  });
-
-  // 세션 내 토큰 재사용 (페이지 새로고침 대응, 만료 시 재로그인 유도)
-  const cached = sessionStorage.getItem("gsheet_token");
-  if (cached) {
-    state.accessToken = cached;
-    onSignedIn(true);
-  }
-
-  $("#authBtn").addEventListener("click", requestToken);
-  $("#authBtn2").addEventListener("click", requestToken);
-  $("#refreshBtn").addEventListener("click", () => loadAll(true));
-}
-
-function requestToken() {
-  state.tokenClient.requestAccessToken({ prompt: state.accessToken ? "" : "consent" });
-}
-
-function onSignedIn(fromCache = false) {
+function initApp() {
   $("#gate").classList.add("hidden");
   $("#app").classList.remove("hidden");
-  $("#authBtn").classList.add("hidden");
   $("#refreshBtn").classList.remove("hidden");
-  loadAll(!fromCache).catch((err) => {
+  $("#refreshBtn").addEventListener("click", () => loadAll(true));
+
+  loadAll(false).catch((err) => {
     console.error(err);
-    // 캐시된 토큰이 만료된 경우 등 -> 재로그인 유도
-    if (String(err).includes("401") || String(err).includes("403")) {
-      sessionStorage.removeItem("gsheet_token");
-      state.accessToken = null;
-      $("#gate").classList.remove("hidden");
-      $("#app").classList.add("hidden");
-      $("#authBtn").classList.remove("hidden");
-      setSyncStatus("로그인이 만료됐어요. 다시 로그인해주세요.");
-    } else {
-      setSyncStatus("데이터 로드 실패: " + err.message);
-    }
+    setSyncStatus("데이터 로드 실패: " + err.message);
   });
 }
 
@@ -79,17 +37,15 @@ function setSyncStatus(text) {
 }
 
 // ============================================
-// Sheets API
+// Sheets API (공개 시트 + API 키, 로그인 불필요)
 // ============================================
 async function fetchGrids(sheetNames) {
   const ranges = sheetNames.map((n) => `'${n}'!A1:AF400`).join("&ranges=");
   const url =
     `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values:batchGet` +
-    `?ranges=${ranges}&valueRenderOption=UNFORMATTED_VALUE`;
+    `?ranges=${ranges}&valueRenderOption=UNFORMATTED_VALUE&key=${CONFIG.API_KEY}`;
 
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${state.accessToken}` },
-  });
+  const res = await fetch(url);
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`${res.status} ${body.slice(0, 200)}`);
@@ -453,7 +409,7 @@ function destroyChart(key) {
 }
 
 const chartDefaults = {
-  color: "#8891a3",
+  color: "#6b7280",
   font: { family: "-apple-system, sans-serif", size: 11 },
 };
 
@@ -469,14 +425,14 @@ function renderTrendChart() {
     data: {
       labels,
       datasets: [
-        { label: "수입", data: income, backgroundColor: "#57b98d", borderRadius: 4, order: 2 },
-        { label: "지출", data: expense, backgroundColor: "#e2596b", borderRadius: 4, order: 2 },
+        { label: "수입", data: income, backgroundColor: "#2f9d6f", borderRadius: 4, order: 2 },
+        { label: "지출", data: expense, backgroundColor: "#d63653", borderRadius: 4, order: 2 },
         {
           label: "저축/투자",
           data: savings,
           type: "line",
-          borderColor: "#d8a94a",
-          backgroundColor: "#d8a94a",
+          borderColor: "#c08a2e",
+          backgroundColor: "#c08a2e",
           tension: 0.35,
           order: 1,
         },
@@ -486,14 +442,14 @@ function renderTrendChart() {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { labels: { color: "#8891a3", font: chartDefaults.font, usePointStyle: true } },
+        legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
         tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtWon(ctx.raw)}` } },
       },
       scales: {
-        x: { grid: { color: "#20242e" }, ticks: { color: "#8891a3" } },
+        x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
         y: {
-          grid: { color: "#20242e" },
-          ticks: { color: "#8891a3", callback: (v) => fmtShort(v) },
+          grid: { color: "#e2e5eb" },
+          ticks: { color: "#6b7280", callback: (v) => fmtShort(v) },
         },
       },
     },
@@ -529,7 +485,7 @@ function renderCatChart(m) {
       datasets: [
         {
           data: entries.map((e) => e[1]),
-          backgroundColor: ["#e2596b", "#d8a94a", "#6f8fd6", "#57b98d", "#c77dff", "#4bc0c0", "#f39c6b", "#8891a3"],
+          backgroundColor: ["#d63653", "#c08a2e", "#4a6cc0", "#2f9d6f", "#c77dff", "#4bc0c0", "#f39c6b", "#6b7280"],
           borderWidth: 0,
         },
       ],
@@ -553,9 +509,9 @@ function renderSideChart() {
     data: {
       labels,
       datasets: [
-        { label: "구매대행", data: mk("구매대행"), backgroundColor: "#6f8fd6", stack: "s" },
-        { label: "해외주식", data: mk("해외주식"), backgroundColor: "#57b98d", stack: "s" },
-        { label: "공모주", data: mk("공모주"), backgroundColor: "#d8a94a", stack: "s" },
+        { label: "구매대행", data: mk("구매대행"), backgroundColor: "#4a6cc0", stack: "s" },
+        { label: "해외주식", data: mk("해외주식"), backgroundColor: "#2f9d6f", stack: "s" },
+        { label: "공모주", data: mk("공모주"), backgroundColor: "#c08a2e", stack: "s" },
         { label: "카테크", data: mk("카테크"), backgroundColor: "#c77dff", stack: "s" },
       ],
     },
@@ -563,12 +519,12 @@ function renderSideChart() {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { labels: { color: "#8891a3", font: chartDefaults.font, usePointStyle: true } },
+        legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
         tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtWon(ctx.raw)}` } },
       },
       scales: {
-        x: { stacked: true, grid: { color: "#20242e" }, ticks: { color: "#8891a3" } },
-        y: { stacked: true, grid: { color: "#20242e" }, ticks: { color: "#8891a3", callback: (v) => fmtShort(v) } },
+        x: { stacked: true, grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
+        y: { stacked: true, grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
       },
     },
   });
@@ -590,11 +546,11 @@ function renderRateChart() {
         {
           label: "저축률(%)",
           data: rates,
-          borderColor: "#d8a94a",
-          backgroundColor: "rgba(216,169,74,0.15)",
+          borderColor: "#c08a2e",
+          backgroundColor: "rgba(192,138,46,0.12)",
           fill: true,
           tension: 0.35,
-          pointBackgroundColor: "#d8a94a",
+          pointBackgroundColor: "#c08a2e",
         },
       ],
     },
@@ -603,8 +559,8 @@ function renderRateChart() {
       maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `저축률: ${ctx.raw}%` } } },
       scales: {
-        x: { grid: { color: "#20242e" }, ticks: { color: "#8891a3" } },
-        y: { grid: { color: "#20242e" }, ticks: { color: "#8891a3", callback: (v) => v + "%" } },
+        x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
+        y: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => v + "%" } },
       },
     },
   });
@@ -613,4 +569,4 @@ function renderRateChart() {
 // ============================================
 // 초기화
 // ============================================
-window.addEventListener("load", initAuth);
+window.addEventListener("load", initApp);

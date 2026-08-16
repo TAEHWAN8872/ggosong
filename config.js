@@ -5,12 +5,11 @@ const CONFIG = {
   // 구글시트 URL의 /d/ 뒤 긴 문자열
   SPREADSHEET_ID: "1xlVqmLgoMFBAOPgwoy5vzwEWcXoVmGQ6zV2Pvw2sHuE",
 
-  // Google Cloud Console > API 및 서비스 > 사용자 인증 정보에서 발급받은 OAuth 클라이언트 ID
-  // (아래 채팅 답변에 발급 방법 정리해뒀어요)
-  CLIENT_ID: "381094473757-gae0pafgkhc6jbkrarjfp5dvmh5djhni.apps.googleusercontent.com",
-
-  // 읽기 전용 스코프
-  SCOPES: "https://www.googleapis.com/auth/spreadsheets.readonly",
+  // Google Cloud Console > API 및 서비스 > 사용자 인증 정보에서 발급받은 "API 키"
+  // (OAuth 클라이언트 ID 아님! 로그인 없이 공개 시트를 읽기 위한 API 키)
+  // - "Google Sheets API"만 사용하도록 제한 권장
+  // - 가능하면 "HTTP 리퍼러" 제한을 걸어서 내 도메인에서만 쓰이도록 제한 권장
+  API_KEY: "AIzaSyBg0rjRqrEMsZoMTZJqQK87i1DPhlrxqw8",
 
   // 시트 탭 이름 (구글시트 하단 탭명과 정확히 일치해야 함)
   SHEET_NAMES: {
