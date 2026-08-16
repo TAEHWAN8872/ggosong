@@ -18,6 +18,19 @@ const fmtShort = (n) => {
   return n.toLocaleString("ko-KR");
 };
 
+// 막대가 0에서 자라나는 기본 애니메이션을 끔 — 매번 최종 상태로 즉시 그려지도록 하여
+// 렌더링 직후(탭 전환/캡처 등) 막대가 짧거나 안 보이는 문제를 방지
+if (typeof Chart !== "undefined") {
+  try {
+    Chart.defaults.animation = false;
+    if (Chart.defaults.transitions?.active?.animation) {
+      Chart.defaults.transitions.active.animation.duration = 0;
+    }
+  } catch (e) {
+    console.warn("Chart.js 애니메이션 설정 실패", e);
+  }
+}
+
 // ============================================
 // 초기 진입 (로그인 없이 바로 로드)
 // ============================================
@@ -605,19 +618,24 @@ const pctLabelPlugin = {
   afterDatasetsDraw(chart) {
     const opt = chart.options.plugins && chart.options.plugins.pctLabels;
     if (!opt || !opt.values) return;
-    const meta = chart.getDatasetMeta(opt.datasetIndex);
-    const ctx = chart.ctx;
-    ctx.save();
-    ctx.font = "700 11px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.textAlign = "center";
-    meta.data.forEach((bar, i) => {
-      const v = opt.values[i];
-      if (v === null || v === undefined || !isFinite(v)) return;
-      const text = (v > 0 ? "+" : "") + v.toFixed(1) + "%";
-      ctx.fillStyle = v >= 0 ? "#2f9d6f" : "#d63653";
-      ctx.fillText(text, bar.x, bar.y - 22);
-    });
-    ctx.restore();
+    try {
+      const meta = chart.getDatasetMeta(opt.datasetIndex);
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.font = "700 11px -apple-system, BlinkMacSystemFont, sans-serif";
+      ctx.textAlign = "center";
+      meta.data.forEach((bar, i) => {
+        if (!bar) return;
+        const v = opt.values[i];
+        if (v === null || v === undefined || !isFinite(v)) return;
+        const text = (v > 0 ? "+" : "") + v.toFixed(1) + "%";
+        ctx.fillStyle = v >= 0 ? "#2f9d6f" : "#d63653";
+        ctx.fillText(text, bar.x, bar.y - 22);
+      });
+      ctx.restore();
+    } catch (e) {
+      console.warn("pctLabels 플러그인 렌더링 오류", e);
+    }
   },
 };
 Chart.register(pctLabelPlugin);
@@ -628,34 +646,39 @@ const amountLabelPlugin = {
   afterDatasetsDraw(chart) {
     const opt = chart.options.plugins && chart.options.plugins.amountLabels;
     if (!opt || !opt.enabled) return;
-    const ctx = chart.ctx;
-    const isHorizontal = chart.options.indexAxis === "y";
-    const formatter = opt.formatter || fmtShort;
-    const datasetIndexes = opt.datasets || chart.data.datasets.map((_, i) => i);
-    ctx.save();
-    ctx.font = "700 10.5px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillStyle = opt.color || "#1a1d24";
-    datasetIndexes.forEach((dsIndex) => {
-      const ds = chart.data.datasets[dsIndex];
-      if (!ds || ds.type === "line") return; // 선 그래프(저축/투자 추이 등)는 제외
-      const meta = chart.getDatasetMeta(dsIndex);
-      if (meta.hidden) return;
-      meta.data.forEach((el, i) => {
-        const val = ds.data[i];
-        if (val === null || val === undefined || val === 0) return;
-        const text = formatter(val);
-        if (isHorizontal) {
-          ctx.textAlign = el.x >= 0 ? "left" : "right";
-          ctx.textBaseline = "middle";
-          ctx.fillText(text, el.x + (el.x >= 0 ? 6 : -6), el.y);
-        } else {
-          ctx.textAlign = "center";
-          ctx.textBaseline = "alphabetic";
-          ctx.fillText(text, el.x, el.y - 8);
-        }
+    try {
+      const ctx = chart.ctx;
+      const isHorizontal = chart.options.indexAxis === "y";
+      const formatter = opt.formatter || fmtShort;
+      const datasetIndexes = opt.datasets || chart.data.datasets.map((_, i) => i);
+      ctx.save();
+      ctx.font = "700 10.5px -apple-system, BlinkMacSystemFont, sans-serif";
+      ctx.fillStyle = opt.color || "#1a1d24";
+      datasetIndexes.forEach((dsIndex) => {
+        const ds = chart.data.datasets[dsIndex];
+        if (!ds || ds.type === "line") return; // 선 그래프(저축/투자 추이 등)는 제외
+        const meta = chart.getDatasetMeta(dsIndex);
+        if (!meta || meta.hidden) return;
+        meta.data.forEach((el, i) => {
+          if (!el) return;
+          const val = ds.data[i];
+          if (val === null || val === undefined || val === 0 || !isFinite(val)) return;
+          const text = formatter(val);
+          if (isHorizontal) {
+            ctx.textAlign = el.x >= 0 ? "left" : "right";
+            ctx.textBaseline = "middle";
+            ctx.fillText(text, el.x + (el.x >= 0 ? 6 : -6), el.y);
+          } else {
+            ctx.textAlign = "center";
+            ctx.textBaseline = "alphabetic";
+            ctx.fillText(text, el.x, el.y - 8);
+          }
+        });
       });
-    });
-    ctx.restore();
+      ctx.restore();
+    } catch (e) {
+      console.warn("amountLabels 플러그인 렌더링 오류", e);
+    }
   },
 };
 Chart.register(amountLabelPlugin);
@@ -666,31 +689,35 @@ const stackTotalLabelPlugin = {
   afterDatasetsDraw(chart) {
     const opt = chart.options.plugins && chart.options.plugins.stackTotalLabels;
     if (!opt || !opt.enabled) return;
-    const datasets = chart.data.datasets;
-    const ctx = chart.ctx;
-    ctx.save();
-    ctx.font = "700 11px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillStyle = "#1a1d24";
-    chart.data.labels.forEach((_, i) => {
-      let total = 0;
-      let topY = null;
-      let x = null;
-      datasets.forEach((ds, dsIndex) => {
-        const val = ds.data[i] || 0;
-        total += val;
-        const meta = chart.getDatasetMeta(dsIndex);
-        if (meta.hidden) return;
-        const bar = meta.data[i];
-        if (bar && val) {
-          if (topY === null || bar.y < topY) topY = bar.y;
-          x = bar.x;
-        }
+    try {
+      const datasets = chart.data.datasets;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.font = "700 11px -apple-system, BlinkMacSystemFont, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#1a1d24";
+      chart.data.labels.forEach((_, i) => {
+        let total = 0;
+        let topY = null;
+        let x = null;
+        datasets.forEach((ds, dsIndex) => {
+          const val = ds.data[i] || 0;
+          total += val;
+          const meta = chart.getDatasetMeta(dsIndex);
+          if (!meta || meta.hidden) return;
+          const bar = meta.data[i];
+          if (bar && val) {
+            if (topY === null || bar.y < topY) topY = bar.y;
+            x = bar.x;
+          }
+        });
+        if (x === null || !total) return;
+        ctx.fillText(fmtShort(total), x, topY - 8);
       });
-      if (x === null || !total) return;
-      ctx.fillText(fmtShort(total), x, topY - 8);
-    });
-    ctx.restore();
+      ctx.restore();
+    } catch (e) {
+      console.warn("stackTotalLabels 플러그인 렌더링 오류", e);
+    }
   },
 };
 Chart.register(stackTotalLabelPlugin);
