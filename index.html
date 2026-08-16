@@ -95,7 +95,7 @@ main{max-width:1180px; margin:0 auto; padding:22px 24px;}
 
 /* ---- KPI 카드 ---- */
 .kpi-grid{
-  display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:22px;
+  display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:22px;
 }
 .kpi-card{
   background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
@@ -120,12 +120,20 @@ main{max-width:1180px; margin:0 auto; padding:22px 24px;}
 .chart-wrap.tall{height:320px;}
 
 /* ---- 카테고리 리스트 ---- */
-.cat-list{display:flex; flex-direction:column; gap:8px; margin-top:8px;}
-.cat-row{display:flex; align-items:center; gap:10px; font-size:12px;}
-.cat-row .name{width:96px; flex-shrink:0; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.cat-list{display:flex; flex-direction:column; gap:6px; margin-top:8px; max-height:520px; overflow-y:auto;}
+.cat-row-wrap{border-bottom:1px solid var(--border);}
+.cat-row-wrap:last-child{border-bottom:none;}
+.cat-row{display:flex; align-items:center; gap:10px; font-size:12px; padding:7px 2px; cursor:pointer; border-radius:6px; transition:background .12s;}
+.cat-row:hover{background:var(--surface-2);}
+.cat-row .name{width:88px; flex-shrink:0; color:var(--text); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .cat-row .bar-track{flex:1; height:8px; background:var(--surface-2); border-radius:4px; overflow:hidden;}
 .cat-row .bar-fill{height:100%; background:var(--expense); border-radius:4px;}
-.cat-row .amt{width:78px; text-align:right; flex-shrink:0; font-weight:700; font-variant-numeric:tabular-nums;}
+.cat-row .amt{width:74px; text-align:right; flex-shrink:0; font-weight:700; font-variant-numeric:tabular-nums;}
+.cat-row .expand-icon{width:14px; flex-shrink:0; text-align:center; color:var(--muted-2); font-size:9px;}
+.cat-detail{padding:2px 2px 8px 98px; display:flex; flex-direction:column; gap:4px;}
+.cat-item-row{display:flex; justify-content:space-between; font-size:11.5px; color:var(--muted);}
+.cat-item-row .cat-item-amt{font-weight:600; color:var(--text); font-variant-numeric:tabular-nums;}
+.cat-item-empty{font-size:11.5px; color:var(--muted-2);}
 
 footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2); font-size:11px;}
 
@@ -170,7 +178,6 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
       </div>
       <div class="panel">
         <h3 id="catTitle">지출 카테고리 breakdown</h3>
-        <div class="chart-wrap"><canvas id="catChart"></canvas></div>
         <div class="cat-list" id="catList"></div>
       </div>
     </div>

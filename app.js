@@ -5,6 +5,7 @@ const state = {
   monthly: {},      // { 1: {income, expense, savings, categories:{}}, ... }
   side: null,        // { months:[...], categories:{...} }
   selectedMonth: "total", // "total" = 종합(1~8월 합계), 또는 1~8 숫자(해당 월)
+  expandedCats: new Set(), // 지출 카테고리 목록에서 펼쳐진 항목들
   charts: {},
 };
 
@@ -155,7 +156,7 @@ function parseSideBusiness(grid) {
 // 파서 3: 신형 포맷 월 시트 (2026-06 ~ 08)
 // ============================================
 function parseNewFormatMonth(grid, ranges) {
-  const out = { income: 0, expense: 0, savings: 0, categories: {}, savingsCategories: {} };
+  const out = { income: 0, expense: 0, savings: 0, categories: {}, categoryDetails: {}, savingsCategories: {} };
 
   // 상단 요약 블록: 총 수입 / 총 지출 / 저축 / 투자 / 잔 액
   const sumHeader = findCell(grid, "총 수입");
@@ -189,6 +190,12 @@ function parseNewFormatMonth(grid, ranges) {
     for (let c = rightCatCol; c < row.length; c++) {
       if (trimStr(row[c]) === "금액") { rightAmtCol = c; break; }
     }
+    let rightItemCol = -1;
+    if (rightCatCol >= 0 && rightAmtCol >= 0) {
+      for (let c = rightCatCol + 1; c < rightAmtCol; c++) {
+        if (trimStr(row[c]) === "항목") { rightItemCol = c; break; }
+      }
+    }
 
     // 고정지출: 실제 시트 수식과 동일한 행 범위만 집계 (예: D13:D31)
     let fixedSum = 0;
@@ -205,6 +212,8 @@ function parseNewFormatMonth(grid, ranges) {
         fixedSum += amt;
         if (cat && item && amt) {
           out.categories[cat] = (out.categories[cat] || 0) + amt;
+          if (!out.categoryDetails[cat]) out.categoryDetails[cat] = {};
+          out.categoryDetails[cat][item] = (out.categoryDetails[cat][item] || 0) + amt;
         }
       }
     }
@@ -220,6 +229,9 @@ function parseNewFormatMonth(grid, ranges) {
         varSum += amt;
         if (cat && amt) {
           out.categories[cat] = (out.categories[cat] || 0) + amt;
+          const item = (rightItemCol >= 0 ? trimStr(rr[rightItemCol]) : "") || cat;
+          if (!out.categoryDetails[cat]) out.categoryDetails[cat] = {};
+          out.categoryDetails[cat][item] = (out.categoryDetails[cat][item] || 0) + amt;
         }
       }
     }
@@ -252,7 +264,7 @@ function parseNewFormatMonth(grid, ranges) {
 // 파서 4: 구형 포맷 월 시트 (26년 1~5월)
 // ============================================
 function parseOldFormatMonth(grid, ranges) {
-  const out = { income: 0, expense: 0, savings: 0, categories: {}, savingsCategories: {} };
+  const out = { income: 0, expense: 0, savings: 0, categories: {}, categoryDetails: {}, savingsCategories: {} };
   if (!ranges) return out;
 
   const CAT = 1, ITEM = 2, AMT = 4; // 분류, 제목, 금액(실제) — B, C, E열
@@ -285,6 +297,9 @@ function parseOldFormatMonth(grid, ranges) {
       if (!cat || !amt || cat === "월급") continue;
       out.expense += amt;
       out.categories[cat] = (out.categories[cat] || 0) + amt;
+      const key = item || "기타";
+      if (!out.categoryDetails[cat]) out.categoryDetails[cat] = {};
+      out.categoryDetails[cat][key] = (out.categoryDetails[cat][key] || 0) + amt;
     }
   });
 
@@ -353,6 +368,7 @@ async function loadAll(forceRefresh) {
       expense: a && a.expense ? a.expense : parsed.expense,
       savings: a && a.savings ? a.savings : parsed.savings,
       categories: parsed.categories,
+      categoryDetails: parsed.categoryDetails,
     };
   }
 
@@ -371,7 +387,7 @@ async function loadAll(forceRefresh) {
 // 종합(전체 합계) 집계
 // ============================================
 function aggregateTotal() {
-  const agg = { income: 0, expense: 0, savings: 0, categories: {} };
+  const agg = { income: 0, expense: 0, savings: 0, categories: {}, categoryDetails: {} };
   CONFIG.MONTHS.forEach((m) => {
     const d = state.monthly[m];
     if (!d) return;
@@ -381,8 +397,27 @@ function aggregateTotal() {
     Object.entries(d.categories || {}).forEach(([k, v]) => {
       agg.categories[k] = (agg.categories[k] || 0) + v;
     });
+    Object.entries(d.categoryDetails || {}).forEach(([cat, items]) => {
+      if (!agg.categoryDetails[cat]) agg.categoryDetails[cat] = {};
+      Object.entries(items).forEach(([item, amt]) => {
+        agg.categoryDetails[cat][item] = (agg.categoryDetails[cat][item] || 0) + amt;
+      });
+    });
   });
   return agg;
+}
+
+// 선택한 범위(전체 or 특정 월)의 부업 수익 합계
+function getSideIncome(sel) {
+  const side = state.side || {};
+  const months = sel === "total" ? CONFIG.MONTHS : [sel];
+  let sum = 0;
+  Object.keys(side).forEach((key) => {
+    months.forEach((m) => {
+      sum += side[key]?.[m] || 0;
+    });
+  });
+  return sum;
 }
 
 // selectedMonth가 "total"이면 전체 합계, 숫자면 해당 월 데이터를 반환
@@ -459,12 +494,14 @@ function renderKpis(sel) {
   const savings = d.savings || 0;
   const balance = income - expense - savings;
   const rate = income ? ((savings / income) * 100).toFixed(1) : "0.0";
+  const sideIncome = getSideIncome(sel);
 
   const cards = [
     { label: "총 수입", value: income, color: "var(--income)" },
     { label: "총 지출", value: expense, color: "var(--expense)" },
     { label: "저축/투자", value: savings, color: "var(--savings)", sub: `저축률 ${rate}%` },
     { label: "잔액", value: balance, color: balance >= 0 ? "var(--income)" : "var(--expense)" },
+    { label: "부업 수익", value: sideIncome, color: "var(--accent)" },
   ];
 
   $("#kpiGrid").innerHTML = cards
@@ -535,46 +572,52 @@ function renderTrendChart() {
 }
 
 function renderCatChart(sel) {
-  destroyChart("cat");
   const label = sel === "total" ? "종합" : `${sel}월`;
-  const cats = getSelectedData(sel).categories || {};
+  const data = getSelectedData(sel);
+  const cats = data.categories || {};
+  const details = data.categoryDetails || {};
   const entries = Object.entries(cats)
     .filter(([, v]) => v > 0)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8);
+    .sort((a, b) => b[1] - a[1]); // 전체 카테고리 (개수 제한 없음)
 
-  $("#catTitle").innerHTML = `${label} 지출 카테고리 <span class="tag">상위 ${entries.length}개</span>`;
+  $("#catTitle").innerHTML = `${label} 지출 카테고리 <span class="tag">총 ${entries.length}개</span>`;
 
   const total = entries.reduce((s, [, v]) => s + v, 0) || 1;
   $("#catList").innerHTML = entries
-    .map(
-      ([name, val]) => `
-    <div class="cat-row">
-      <div class="name">${name}</div>
-      <div class="bar-track"><div class="bar-fill" style="width:${(val / total) * 100}%"></div></div>
-      <div class="amt">${fmtShort(val)}</div>
-    </div>`
-    )
+    .map(([name, val]) => {
+      const isOpen = state.expandedCats.has(name);
+      const items = Object.entries(details[name] || {}).sort((a, b) => b[1] - a[1]);
+      const itemsHtml = items.length
+        ? items
+            .map(
+              ([item, amt]) => `
+        <div class="cat-item-row"><span>${item}</span><span class="cat-item-amt">${fmtShort(amt)}</span></div>`
+            )
+            .join("")
+        : `<div class="cat-item-empty">세부 내역 없음</div>`;
+      return `
+      <div class="cat-row-wrap">
+        <div class="cat-row" data-cat="${name}">
+          <div class="name">${name}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${(val / total) * 100}%"></div></div>
+          <div class="amt">${fmtShort(val)}</div>
+          <div class="expand-icon">${isOpen ? "▲" : "▼"}</div>
+        </div>
+        <div class="cat-detail ${isOpen ? "" : "hidden"}">${itemsHtml}</div>
+      </div>`;
+    })
     .join("");
 
-  state.charts.cat = new Chart($("#catChart"), {
-    type: "doughnut",
-    data: {
-      labels: entries.map((e) => e[0]),
-      datasets: [
-        {
-          data: entries.map((e) => e[1]),
-          backgroundColor: ["#d63653", "#c08a2e", "#4a6cc0", "#2f9d6f", "#c77dff", "#4bc0c0", "#f39c6b", "#6b7280"],
-          borderWidth: 0,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${fmtWon(ctx.raw)}` } } },
-    },
-  });
+  $("#catList")
+    .querySelectorAll(".cat-row")
+    .forEach((row) => {
+      row.addEventListener("click", () => {
+        const name = row.dataset.cat;
+        if (state.expandedCats.has(name)) state.expandedCats.delete(name);
+        else state.expandedCats.add(name);
+        renderCatChart(sel);
+      });
+    });
 }
 
 function renderSideChart() {
