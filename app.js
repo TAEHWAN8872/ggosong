@@ -26,6 +26,10 @@ function initApp() {
   $("#refreshBtn").classList.remove("hidden");
   $("#refreshBtn").addEventListener("click", () => loadAll(true));
 
+  if (typeof Chart === "undefined") {
+    setSyncStatus("차트 라이브러리 로드 실패 (Chart.js CDN 확인 필요)");
+  }
+
   loadAll(false).catch((err) => {
     console.error(err);
     setSyncStatus("데이터 로드 실패: " + err.message);
