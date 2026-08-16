@@ -615,12 +615,50 @@ const pctLabelPlugin = {
       if (v === null || v === undefined || !isFinite(v)) return;
       const text = (v > 0 ? "+" : "") + v.toFixed(1) + "%";
       ctx.fillStyle = v >= 0 ? "#2f9d6f" : "#d63653";
-      ctx.fillText(text, bar.x, bar.y - 8);
+      ctx.fillText(text, bar.x, bar.y - 22);
     });
     ctx.restore();
   },
 };
 Chart.register(pctLabelPlugin);
+
+// 막대(세로) 위 / 막대(가로) 옆에 항상 금액을 숫자로 그려주는 플러그인 — 마우스를 올리지 않아도 값이 보이도록 함
+const amountLabelPlugin = {
+  id: "amountLabels",
+  afterDatasetsDraw(chart) {
+    const opt = chart.options.plugins && chart.options.plugins.amountLabels;
+    if (!opt || !opt.enabled) return;
+    const ctx = chart.ctx;
+    const isHorizontal = chart.options.indexAxis === "y";
+    const formatter = opt.formatter || fmtShort;
+    const datasetIndexes = opt.datasets || chart.data.datasets.map((_, i) => i);
+    ctx.save();
+    ctx.font = "700 10.5px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillStyle = opt.color || "#1a1d24";
+    datasetIndexes.forEach((dsIndex) => {
+      const ds = chart.data.datasets[dsIndex];
+      if (!ds || ds.type === "line") return; // 선 그래프(저축/투자 추이 등)는 제외
+      const meta = chart.getDatasetMeta(dsIndex);
+      if (meta.hidden) return;
+      meta.data.forEach((el, i) => {
+        const val = ds.data[i];
+        if (val === null || val === undefined || val === 0) return;
+        const text = formatter(val);
+        if (isHorizontal) {
+          ctx.textAlign = el.x >= 0 ? "left" : "right";
+          ctx.textBaseline = "middle";
+          ctx.fillText(text, el.x + (el.x >= 0 ? 6 : -6), el.y);
+        } else {
+          ctx.textAlign = "center";
+          ctx.textBaseline = "alphabetic";
+          ctx.fillText(text, el.x, el.y - 8);
+        }
+      });
+    });
+    ctx.restore();
+  },
+};
+Chart.register(amountLabelPlugin);
 
 // 누적 막대그래프(부업 수익 추이) 맨 위에 그 달의 합계를 숫자로 그려주는 플러그인
 const stackTotalLabelPlugin = {
@@ -692,13 +730,19 @@ function renderTrendChart(sel) {
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        layout: { padding: { top: 20 } },
         plugins: {
           legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
           tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtWon(ctx.raw)}` } },
+          amountLabels: { enabled: true, datasets: [0, 1] },
         },
         scales: {
           x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
-          y: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
+          y: {
+            grid: { color: "#e2e5eb" },
+            suggestedMax: Math.max(...income, ...expense, 1) * 1.15,
+            ticks: { color: "#6b7280", callback: (v) => fmtShort(v) },
+          },
         },
       },
     });
@@ -749,11 +793,12 @@ function renderTrendChart(sel) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      layout: { padding: { top: 24 } },
+      layout: { padding: { top: 36 } },
       plugins: {
         legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
         tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtWon(ctx.raw)}` } },
         pctLabels: { values: pctValues, datasetIndex: curDatasetIndex },
+        amountLabels: { enabled: true },
       },
       scales: {
         x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
@@ -903,13 +948,19 @@ function renderSideChart(sel) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      layout: { padding: { top: 20 } },
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: { label: (ctx) => fmtWon(ctx.raw) } },
+        amountLabels: { enabled: true },
       },
       scales: {
         x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
-        y: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
+        y: {
+          grid: { color: "#e2e5eb" },
+          suggestedMax: Math.max(...values, 1) * 1.15,
+          ticks: { color: "#6b7280", callback: (v) => fmtShort(v) },
+        },
       },
     },
   });
@@ -1014,6 +1065,7 @@ function renderRateChart(sel) {
 
   titleEl.textContent = `${sel}월 저축 카테고리`;
   tagEl.textContent = `총 ${entries.length}개`;
+  const maxSavingsVal = Math.max(...entries.map(([, v]) => v), 1);
 
   state.charts.rate = new Chart($("#rateChart"), {
     type: "bar",
@@ -1028,9 +1080,10 @@ function renderRateChart(sel) {
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: { label: (ctx) => fmtWon(ctx.raw) } },
+        amountLabels: { enabled: true, formatter: fmtWon },
       },
       scales: {
-        x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
+        x: { grid: { color: "#e2e5eb" }, suggestedMax: maxSavingsVal * 1.25, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
         y: { grid: { display: false }, ticks: { color: "#6b7280" } },
       },
     },
@@ -1082,6 +1135,7 @@ function renderAssetPanel(sel) {
     ...snap.assets.map((i) => ({ ...i, color: "#2f9d6f" })),
     ...snap.realEstate.map((i) => ({ ...i, color: "#c08a2e" })),
   ].filter((i) => i.value);
+  const maxAssetVal = Math.max(...items.map((i) => i.value), 1);
 
   state.charts.asset = new Chart($("#assetChart"), {
     type: "bar",
@@ -1096,9 +1150,10 @@ function renderAssetPanel(sel) {
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: { label: (ctx) => fmtWon(ctx.raw) } },
+        amountLabels: { enabled: true, formatter: fmtWon },
       },
       scales: {
-        x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
+        x: { grid: { color: "#e2e5eb" }, suggestedMax: maxAssetVal * 1.25, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
         y: { grid: { display: false }, ticks: { color: "#6b7280" } },
       },
     },
