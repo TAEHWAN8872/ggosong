@@ -451,27 +451,18 @@ function renderMonthRibbon() {
   };
 
   // 종합 타일 (1~8월 전체 합계) — 맨 앞에 고정
-  const total = aggregateTotal();
   const totalTile = document.createElement("div");
   totalTile.className = "month-tile" + (state.selectedMonth === "total" ? " active" : "");
-  const totalNet = total.income - total.expense - total.savings;
-  totalTile.innerHTML = `
-    <div class="m-label">종합</div>
-    <div class="m-net" style="color:${totalNet >= 0 ? "var(--income)" : "var(--expense)"}">${fmtShort(totalNet)}</div>
-  `;
+  totalTile.innerHTML = `<div class="m-label">종합</div>`;
   totalTile.addEventListener("click", () => selectMonth("total"));
   wrap.appendChild(totalTile);
 
   CONFIG.MONTHS.forEach((m) => {
     const d = state.monthly[m] || {};
     const hasData = (d.income || 0) > 0 || (d.expense || 0) > 0;
-    const net = (d.income || 0) - (d.expense || 0) - (d.savings || 0);
     const tile = document.createElement("div");
     tile.className = "month-tile" + (m === state.selectedMonth ? " active" : "") + (hasData ? "" : " empty");
-    tile.innerHTML = `
-      <div class="m-label">${m}월</div>
-      <div class="m-net" style="color:${net >= 0 ? "var(--income)" : "var(--expense)"}">${hasData ? fmtShort(net) : "–"}</div>
-    `;
+    tile.innerHTML = `<div class="m-label">${m}월</div>`;
     tile.addEventListener("click", () => selectMonth(m));
     wrap.appendChild(tile);
   });
