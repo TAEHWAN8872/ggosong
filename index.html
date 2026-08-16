@@ -170,7 +170,7 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
 
     <div class="panel-grid">
       <div class="panel">
-        <h3>월별 수입 · 지출 · 저축 추이 <span class="tag">2026년 1~8월</span></h3>
+        <h3><span id="trendTitleText">월별 수입 · 지출 · 저축 추이</span> <span class="tag" id="trendTag">2026년 1~8월</span></h3>
         <div class="chart-wrap tall"><canvas id="trendChart"></canvas></div>
       </div>
       <div class="panel">
@@ -181,11 +181,11 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
 
     <div class="panel-grid">
       <div class="panel">
-        <h3>부업 수익 추이 <span class="tag">구매대행 · 해외주식 · 공모주</span></h3>
+        <h3><span id="sideTitleText">부업 수익 추이</span> <span class="tag" id="sideTag">구매대행 · 해외주식 · 공모주</span></h3>
         <div class="chart-wrap"><canvas id="sideChart"></canvas></div>
       </div>
       <div class="panel">
-        <h3>저축률 <span class="tag">저축÷수입</span></h3>
+        <h3><span id="rateTitleText">저축률</span> <span class="tag" id="rateTag">저축÷수입</span></h3>
         <div class="chart-wrap"><canvas id="rateChart"></canvas></div>
       </div>
     </div>

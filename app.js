@@ -374,6 +374,7 @@ async function loadAll(forceRefresh) {
       savings: a && a.savings ? a.savings : parsed.savings,
       categories: parsed.categories,
       categoryDetails: parsed.categoryDetails,
+      savingsCategories: parsed.savingsCategories,
     };
   }
 
@@ -433,10 +434,10 @@ function getSelectedData(sel) {
 function renderAll() {
   renderMonthRibbon();
   renderKpis(state.selectedMonth);
-  renderTrendChart();
+  renderTrendChart(state.selectedMonth);
   renderCatChart(state.selectedMonth);
-  renderSideChart();
-  renderRateChart();
+  renderSideChart(state.selectedMonth);
+  renderRateChart(state.selectedMonth);
 }
 
 function renderMonthRibbon() {
@@ -448,6 +449,9 @@ function renderMonthRibbon() {
     renderMonthRibbon();
     renderKpis(sel);
     renderCatChart(sel);
+    renderTrendChart(sel);
+    renderSideChart(sel);
+    renderRateChart(sel);
   };
 
   // 종합 타일 (1~8월 전체 합계) — 맨 앞에 고정
@@ -508,31 +512,85 @@ const chartDefaults = {
   font: { family: "-apple-system, sans-serif", size: 11 },
 };
 
-function renderTrendChart() {
+function renderTrendChart(sel) {
   destroyChart("trend");
-  const labels = CONFIG.MONTHS.map((m) => `${m}월`);
-  const income = CONFIG.MONTHS.map((m) => state.monthly[m]?.income || 0);
-  const expense = CONFIG.MONTHS.map((m) => state.monthly[m]?.expense || 0);
-  const savings = CONFIG.MONTHS.map((m) => state.monthly[m]?.savings || 0);
+  const titleEl = $("#trendTitleText");
+  const tagEl = $("#trendTag");
+
+  if (sel === "total") {
+    titleEl.textContent = "월별 수입 · 지출 · 저축 추이";
+    tagEl.textContent = "2026년 1~8월";
+    const labels = CONFIG.MONTHS.map((m) => `${m}월`);
+    const income = CONFIG.MONTHS.map((m) => (state.monthly[m]?.income || 0) + getSideIncome(m));
+    const expense = CONFIG.MONTHS.map((m) => state.monthly[m]?.expense || 0);
+    const savings = CONFIG.MONTHS.map((m) => state.monthly[m]?.savings || 0);
+
+    state.charts.trend = new Chart($("#trendChart"), {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          { label: "수입", data: income, backgroundColor: "#2f9d6f", borderRadius: 4, order: 2 },
+          { label: "지출", data: expense, backgroundColor: "#d63653", borderRadius: 4, order: 2 },
+          {
+            label: "저축/투자",
+            data: savings,
+            type: "line",
+            borderColor: "#c08a2e",
+            backgroundColor: "#c08a2e",
+            tension: 0.35,
+            order: 1,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtWon(ctx.raw)}` } },
+        },
+        scales: {
+          x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
+          y: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
+        },
+      },
+    });
+    return;
+  }
+
+  // 특정 월: 전월 대비 수입/지출/저축 비교
+  const cur = state.monthly[sel] || {};
+  const prevM = sel - 1;
+  const prev = prevM >= 1 ? state.monthly[prevM] : null;
+  const curIncome = (cur.income || 0) + getSideIncome(sel);
+  const prevIncome = prev ? (prev.income || 0) + getSideIncome(prevM) : null;
+
+  titleEl.textContent = `${sel}월 수입 · 지출 · 저축`;
+  tagEl.textContent = prev ? `${prevM}월 대비` : "전월 데이터 없음";
+
+  const labels = ["수입", "지출", "저축/투자"];
+  const curData = [curIncome, cur.expense || 0, cur.savings || 0];
+  const datasets = [
+    {
+      label: `${sel}월`,
+      data: curData,
+      backgroundColor: ["#2f9d6f", "#d63653", "#c08a2e"],
+      borderRadius: 4,
+    },
+  ];
+  if (prev) {
+    datasets.unshift({
+      label: `${prevM}월`,
+      data: [prevIncome, prev.expense || 0, prev.savings || 0],
+      backgroundColor: "#c9ced9",
+      borderRadius: 4,
+    });
+  }
 
   state.charts.trend = new Chart($("#trendChart"), {
     type: "bar",
-    data: {
-      labels,
-      datasets: [
-        { label: "수입", data: income, backgroundColor: "#2f9d6f", borderRadius: 4, order: 2 },
-        { label: "지출", data: expense, backgroundColor: "#d63653", borderRadius: 4, order: 2 },
-        {
-          label: "저축/투자",
-          data: savings,
-          type: "line",
-          borderColor: "#c08a2e",
-          backgroundColor: "#c08a2e",
-          tension: 0.35,
-          order: 1,
-        },
-      ],
-    },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -542,10 +600,7 @@ function renderTrendChart() {
       },
       scales: {
         x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
-        y: {
-          grid: { color: "#e2e5eb" },
-          ticks: { color: "#6b7280", callback: (v) => fmtShort(v) },
-        },
+        y: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
       },
     },
   });
@@ -600,69 +655,147 @@ function renderCatChart(sel) {
     });
 }
 
-function renderSideChart() {
+function renderSideChart(sel) {
   destroyChart("side");
-  const labels = CONFIG.MONTHS.map((m) => `${m}월`);
+  const titleEl = $("#sideTitleText");
+  const tagEl = $("#sideTag");
   const side = state.side || {};
-  const mk = (key) => CONFIG.MONTHS.map((m) => (side[key] ? side[key][m] || 0 : 0));
+
+  if (sel === "total") {
+    titleEl.textContent = "부업 수익 추이";
+    tagEl.textContent = "구매대행 · 해외주식 · 공모주";
+    const labels = CONFIG.MONTHS.map((m) => `${m}월`);
+    const mk = (key) => CONFIG.MONTHS.map((m) => (side[key] ? side[key][m] || 0 : 0));
+
+    state.charts.side = new Chart($("#sideChart"), {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          { label: "구매대행", data: mk("구매대행"), backgroundColor: "#4a6cc0", stack: "s" },
+          { label: "해외주식", data: mk("해외주식"), backgroundColor: "#2f9d6f", stack: "s" },
+          { label: "공모주", data: mk("공모주"), backgroundColor: "#c08a2e", stack: "s" },
+          { label: "카테크", data: mk("카테크"), backgroundColor: "#c77dff", stack: "s" },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtWon(ctx.raw)}` } },
+        },
+        scales: {
+          x: { stacked: true, grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
+          y: { stacked: true, grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
+        },
+      },
+    });
+    return;
+  }
+
+  // 특정 월: 그 달의 부업 수익 카테고리별 breakdown
+  titleEl.textContent = `${sel}월 부업 수익`;
+  const cats = [
+    { key: "구매대행", color: "#4a6cc0" },
+    { key: "해외주식", color: "#2f9d6f" },
+    { key: "공모주", color: "#c08a2e" },
+    { key: "카테크", color: "#c77dff" },
+  ];
+  const values = cats.map((c) => (side[c.key] ? side[c.key][sel] || 0 : 0));
+  tagEl.textContent = `총 ${fmtShort(values.reduce((a, b) => a + b, 0))}`;
 
   state.charts.side = new Chart($("#sideChart"), {
     type: "bar",
     data: {
-      labels,
-      datasets: [
-        { label: "구매대행", data: mk("구매대행"), backgroundColor: "#4a6cc0", stack: "s" },
-        { label: "해외주식", data: mk("해외주식"), backgroundColor: "#2f9d6f", stack: "s" },
-        { label: "공모주", data: mk("공모주"), backgroundColor: "#c08a2e", stack: "s" },
-        { label: "카테크", data: mk("카테크"), backgroundColor: "#c77dff", stack: "s" },
-      ],
+      labels: cats.map((c) => c.key),
+      datasets: [{ data: values, backgroundColor: cats.map((c) => c.color), borderRadius: 4 }],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
-        tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtWon(ctx.raw)}` } },
+        legend: { display: false },
+        tooltip: { callbacks: { label: (ctx) => fmtWon(ctx.raw) } },
       },
       scales: {
-        x: { stacked: true, grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
-        y: { stacked: true, grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
+        x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
+        y: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
       },
     },
   });
 }
 
-function renderRateChart() {
+function renderRateChart(sel) {
   destroyChart("rate");
-  const labels = CONFIG.MONTHS.map((m) => `${m}월`);
-  const rates = CONFIG.MONTHS.map((m) => {
-    const d = state.monthly[m] || {};
-    return d.income ? Number(((d.savings / d.income) * 100).toFixed(1)) : 0;
-  });
+  const titleEl = $("#rateTitleText");
+  const tagEl = $("#rateTag");
+
+  if (sel === "total") {
+    titleEl.textContent = "저축률";
+    tagEl.textContent = "저축÷수입";
+    const labels = CONFIG.MONTHS.map((m) => `${m}월`);
+    const rates = CONFIG.MONTHS.map((m) => {
+      const d = state.monthly[m] || {};
+      const income = (d.income || 0) + getSideIncome(m);
+      return income ? Number(((d.savings / income) * 100).toFixed(1)) : 0;
+    });
+
+    state.charts.rate = new Chart($("#rateChart"), {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "저축률(%)",
+            data: rates,
+            borderColor: "#c08a2e",
+            backgroundColor: "rgba(192,138,46,0.12)",
+            fill: true,
+            tension: 0.35,
+            pointBackgroundColor: "#c08a2e",
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `저축률: ${ctx.raw}%` } } },
+        scales: {
+          x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
+          y: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => v + "%" } },
+        },
+      },
+    });
+    return;
+  }
+
+  // 특정 월: 그 달의 저축 카테고리별 breakdown
+  const d = state.monthly[sel] || {};
+  const entries = Object.entries(d.savingsCategories || {})
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1]);
+
+  titleEl.textContent = `${sel}월 저축 카테고리`;
+  tagEl.textContent = `총 ${entries.length}개`;
 
   state.charts.rate = new Chart($("#rateChart"), {
-    type: "line",
+    type: "bar",
     data: {
-      labels,
-      datasets: [
-        {
-          label: "저축률(%)",
-          data: rates,
-          borderColor: "#c08a2e",
-          backgroundColor: "rgba(192,138,46,0.12)",
-          fill: true,
-          tension: 0.35,
-          pointBackgroundColor: "#c08a2e",
-        },
-      ],
+      labels: entries.map(([name]) => name),
+      datasets: [{ data: entries.map(([, v]) => v), backgroundColor: "#c08a2e", borderRadius: 4 }],
     },
     options: {
+      indexAxis: "y",
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `저축률: ${ctx.raw}%` } } },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (ctx) => fmtWon(ctx.raw) } },
+      },
       scales: {
-        x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
-        y: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => v + "%" } },
+        x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
+        y: { grid: { display: false }, ticks: { color: "#6b7280" } },
       },
     },
   });
