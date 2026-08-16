@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>가계부 대시보드 · 꼬부기+송</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#0e1015;
+  --surface:#171a22;
+  --surface-2:#1d212b;
+  --border:#262b36;
+  --text:#e9ebef;
+  --muted:#8891a3;
+  --muted-2:#5c6577;
+  --income:#57b98d;
+  --expense:#e2596b;
+  --savings:#d8a94a;
+  --accent:#6f8fd6;
+  --radius:10px;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard Variable","Malgun Gothic",sans-serif;
+  font-variant-numeric:tabular-nums;
+  min-height:100vh;
+  padding-bottom:60px;
+}
+a{color:inherit;}
+
+/* ---- 헤더 ---- */
+header{
+  position:sticky; top:0; z-index:50;
+  background:rgba(14,16,21,0.92);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--border);
+  padding:14px 24px;
+  display:flex; align-items:center; justify-content:space-between;
+  gap:16px; flex-wrap:wrap;
+}
+.brand{display:flex; align-items:center; gap:10px;}
+.brand .mark{
+  width:30px;height:30px;border-radius:8px;
+  background:linear-gradient(135deg,var(--income),var(--savings));
+  display:flex;align-items:center;justify-content:center;
+  font-size:15px; font-weight:800; color:#0e1015;
+}
+.brand h1{font-size:15px; font-weight:700; margin:0; letter-spacing:-0.2px;}
+.brand .sub{font-size:11px; color:var(--muted); margin-top:1px;}
+
+.header-right{display:flex; align-items:center; gap:10px;}
+#syncStatus{font-size:11px; color:var(--muted-2);}
+.btn{
+  background:var(--surface-2); color:var(--text); border:1px solid var(--border);
+  padding:8px 14px; border-radius:8px; font-size:13px; cursor:pointer;
+  font-weight:600; transition:background .15s, border-color .15s;
+}
+.btn:hover{background:#252a35; border-color:#333a48;}
+.btn.primary{background:var(--income); color:#08130e; border-color:var(--income);}
+.btn.primary:hover{filter:brightness(1.08);}
+.btn:disabled{opacity:.45; cursor:not-allowed;}
+
+/* ---- 레이아웃 ---- */
+main{max-width:1180px; margin:0 auto; padding:22px 24px;}
+.gate{
+  margin-top:80px; text-align:center; color:var(--muted);
+}
+.gate h2{color:var(--text); font-size:20px;}
+.gate p{font-size:13px; line-height:1.7; max-width:420px; margin:10px auto 22px;}
+.hidden{display:none !important;}
+
+/* ---- 월 리본 ---- */
+.month-ribbon{
+  display:grid; grid-template-columns:repeat(8,1fr); gap:8px;
+  margin-bottom:22px;
+}
+.month-tile{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:10px 8px; cursor:pointer; text-align:center; transition:border-color .15s, transform .1s;
+}
+.month-tile:hover{border-color:var(--accent); transform:translateY(-1px);}
+.month-tile.active{border-color:var(--income); background:var(--surface-2);}
+.month-tile .m-label{font-size:11px; color:var(--muted); font-weight:600;}
+.month-tile .m-bar{
+  height:34px; display:flex; align-items:flex-end; justify-content:center; gap:3px; margin:6px 0 4px;
+}
+.month-tile .m-bar div{width:7px; border-radius:2px 2px 0 0;}
+.month-tile .m-net{font-size:10px; font-weight:700;}
+.month-tile.empty{opacity:.35;}
+
+/* ---- KPI 카드 ---- */
+.kpi-grid{
+  display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:22px;
+}
+.kpi-card{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:16px 18px;
+}
+.kpi-card .label{font-size:11px; color:var(--muted); font-weight:600; display:flex; align-items:center; gap:6px;}
+.kpi-card .dot{width:7px;height:7px;border-radius:50%;}
+.kpi-card .value{font-size:21px; font-weight:800; margin-top:8px; letter-spacing:-0.3px;}
+.kpi-card .delta{font-size:11px; margin-top:4px; color:var(--muted-2);}
+
+/* ---- 패널 ---- */
+.panel-grid{display:grid; grid-template-columns:1.3fr 1fr; gap:14px; margin-bottom:14px;}
+.panel{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:18px;
+}
+.panel h3{font-size:13px; margin:0 0 14px; font-weight:700; display:flex; align-items:center; justify-content:space-between;}
+.panel h3 span.tag{font-size:10px; font-weight:600; color:var(--muted-2); background:var(--surface-2); padding:3px 8px; border-radius:20px;}
+.chart-wrap{position:relative; height:260px;}
+.chart-wrap.tall{height:320px;}
+
+/* ---- 카테고리 리스트 ---- */
+.cat-list{display:flex; flex-direction:column; gap:8px; margin-top:8px;}
+.cat-row{display:flex; align-items:center; gap:10px; font-size:12px;}
+.cat-row .name{width:96px; flex-shrink:0; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.cat-row .bar-track{flex:1; height:8px; background:var(--surface-2); border-radius:4px; overflow:hidden;}
+.cat-row .bar-fill{height:100%; background:var(--expense); border-radius:4px;}
+.cat-row .amt{width:78px; text-align:right; flex-shrink:0; font-weight:700; font-variant-numeric:tabular-nums;}
+
+footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2); font-size:11px;}
+
+@media (max-width: 860px){
+  .kpi-grid{grid-template-columns:repeat(2,1fr);}
+  .panel-grid{grid-template-columns:1fr;}
+  .month-ribbon{grid-template-columns:repeat(4,1fr);}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="mark">가</div>
+    <div>
+      <h1>가계부 대시보드</h1>
+      <div class="sub">꼬부기 + 송 가족 · 2026</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <span id="syncStatus"></span>
+    <button id="refreshBtn" class="btn hidden">↻ 새로고침</button>
+    <button id="authBtn" class="btn primary">Google로 로그인</button>
+  </div>
+</header>
+
+<main>
+  <div id="gate" class="gate">
+    <h2>구글 계정으로 로그인해주세요</h2>
+    <p>이 대시보드는 구글 시트 API를 실시간으로 직접 호출합니다. 데이터는 서버에 저장되지 않고 브라우저와 구글 사이에서만 오갑니다.</p>
+    <button id="authBtn2" class="btn primary">Google로 로그인</button>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="month-ribbon" id="monthRibbon"></div>
+
+    <div class="kpi-grid" id="kpiGrid"></div>
+
+    <div class="panel-grid">
+      <div class="panel">
+        <h3>월별 수입 · 지출 · 저축 추이 <span class="tag">2026년 1~8월</span></h3>
+        <div class="chart-wrap tall"><canvas id="trendChart"></canvas></div>
+      </div>
+      <div class="panel">
+        <h3 id="catTitle">지출 카테고리 breakdown</h3>
+        <div class="chart-wrap"><canvas id="catChart"></canvas></div>
+        <div class="cat-list" id="catList"></div>
+      </div>
+    </div>
+
+    <div class="panel-grid">
+      <div class="panel">
+        <h3>부업 수익 추이 <span class="tag">구매대행 · 해외주식 · 공모주</span></h3>
+        <div class="chart-wrap"><canvas id="sideChart"></canvas></div>
+      </div>
+      <div class="panel">
+        <h3>저축률 <span class="tag">저축÷수입</span></h3>
+        <div class="chart-wrap"><canvas id="rateChart"></canvas></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>구글 시트 원본 데이터를 실시간으로 불러옵니다 · 브라우저 로컬에만 캐시됩니다</footer>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

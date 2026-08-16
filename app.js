@@ -1,0 +1,616 @@
+// ============================================
+// 상태
+// ============================================
+const state = {
+  accessToken: null,
+  tokenClient: null,
+  monthly: {},      // { 1: {income, expense, savings, categories:{}}, ... }
+  side: null,        // { months:[...], categories:{...} }
+  selectedMonth: 8,
+  charts: {},
+};
+
+const $ = (sel) => document.querySelector(sel);
+const fmtWon = (n) => (n < 0 ? "-" : "") + "₩" + Math.abs(Math.round(n)).toLocaleString("ko-KR");
+const fmtShort = (n) => {
+  const abs = Math.abs(n);
+  if (abs >= 100000000) return (n / 100000000).toFixed(1) + "억";
+  if (abs >= 10000) return Math.round(n / 10000) + "만";
+  return n.toLocaleString("ko-KR");
+};
+
+// ============================================
+// 인증 (Google Identity Services)
+// ============================================
+function initAuth() {
+  state.tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CONFIG.CLIENT_ID,
+    scope: CONFIG.SCOPES,
+    callback: (resp) => {
+      if (resp.error) {
+        setSyncStatus("로그인 실패: " + resp.error);
+        return;
+      }
+      state.accessToken = resp.access_token;
+      sessionStorage.setItem("gsheet_token", resp.access_token);
+      onSignedIn();
+    },
+  });
+
+  // 세션 내 토큰 재사용 (페이지 새로고침 대응, 만료 시 재로그인 유도)
+  const cached = sessionStorage.getItem("gsheet_token");
+  if (cached) {
+    state.accessToken = cached;
+    onSignedIn(true);
+  }
+
+  $("#authBtn").addEventListener("click", requestToken);
+  $("#authBtn2").addEventListener("click", requestToken);
+  $("#refreshBtn").addEventListener("click", () => loadAll(true));
+}
+
+function requestToken() {
+  state.tokenClient.requestAccessToken({ prompt: state.accessToken ? "" : "consent" });
+}
+
+function onSignedIn(fromCache = false) {
+  $("#gate").classList.add("hidden");
+  $("#app").classList.remove("hidden");
+  $("#authBtn").classList.add("hidden");
+  $("#refreshBtn").classList.remove("hidden");
+  loadAll(!fromCache).catch((err) => {
+    console.error(err);
+    // 캐시된 토큰이 만료된 경우 등 -> 재로그인 유도
+    if (String(err).includes("401") || String(err).includes("403")) {
+      sessionStorage.removeItem("gsheet_token");
+      state.accessToken = null;
+      $("#gate").classList.remove("hidden");
+      $("#app").classList.add("hidden");
+      $("#authBtn").classList.remove("hidden");
+      setSyncStatus("로그인이 만료됐어요. 다시 로그인해주세요.");
+    } else {
+      setSyncStatus("데이터 로드 실패: " + err.message);
+    }
+  });
+}
+
+function setSyncStatus(text) {
+  $("#syncStatus").textContent = text;
+}
+
+// ============================================
+// Sheets API
+// ============================================
+async function fetchGrids(sheetNames) {
+  const ranges = sheetNames.map((n) => `'${n}'!A1:AF400`).join("&ranges=");
+  const url =
+    `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values:batchGet` +
+    `?ranges=${ranges}&valueRenderOption=UNFORMATTED_VALUE`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${state.accessToken}` },
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status} ${body.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const out = {};
+  data.valueRanges.forEach((vr, i) => {
+    out[sheetNames[i]] = vr.values || [];
+  });
+  return out;
+}
+
+// ============================================
+// 그리드 유틸
+// ============================================
+const cell = (grid, r, c) => (grid[r] && grid[r][c] !== undefined ? grid[r][c] : "");
+const trimStr = (v) => (typeof v === "string" ? v.trim() : v);
+const isNum = (v) => typeof v === "number";
+const toNum = (v) => (isNum(v) ? v : 0);
+
+// grid 전체에서 matcher(문자열 또는 함수)와 일치하는 첫 셀 위치 찾기
+function findCell(grid, matcher, opts = {}) {
+  const test = typeof matcher === "function" ? matcher : (v) => trimStr(v) === matcher;
+  const startRow = opts.startRow || 0;
+  for (let r = startRow; r < grid.length; r++) {
+    const row = grid[r] || [];
+    for (let c = 0; c < row.length; c++) {
+      if (test(row[c])) return { r, c };
+    }
+  }
+  return null;
+}
+
+// row 배열에서 matcher 위치(컬럼 인덱스) 찾기
+function findColInRow(row, matcher) {
+  const test = typeof matcher === "function" ? matcher : (v) => trimStr(v) === matcher;
+  for (let c = 0; c < row.length; c++) if (test(row[c])) return c;
+  return -1;
+}
+
+function rowIsBlank(row, cols) {
+  return cols.every((c) => {
+    const v = row[c];
+    return v === undefined || v === "" || v === null;
+  });
+}
+
+// ============================================
+// 파서 1: 연간 요약 시트
+// ============================================
+function parseAnnualSummary(grid) {
+  const header = findCell(grid, "항목");
+  if (!header) return null;
+  const headerRow = grid[header.r];
+  const monthCol = (m) => findColInRow(headerRow, `${m}월`);
+
+  const rows = { income: null, expense: null, savings: null };
+  for (let r = header.r + 1; r < header.r + 6; r++) {
+    const label = trimStr(cell(grid, r, header.c));
+    if (label === "총 수입") rows.income = r;
+    else if (label === "총 지출") rows.expense = r;
+    else if (label === "저축/투자" || label === "저축 / 투자") rows.savings = r;
+  }
+  const result = {};
+  for (const m of CONFIG.MONTHS) {
+    const c = monthCol(m);
+    result[m] = {
+      income: rows.income != null && c >= 0 ? toNum(cell(grid, rows.income, c)) : null,
+      expense: rows.expense != null && c >= 0 ? toNum(cell(grid, rows.expense, c)) : null,
+      savings: rows.savings != null && c >= 0 ? toNum(cell(grid, rows.savings, c)) : null,
+    };
+  }
+  return result;
+}
+
+// ============================================
+// 파서 2: 부업 시트 (26년 요약 블록만 사용)
+// ============================================
+function parseSideBusiness(grid) {
+  const yearCell = findCell(grid, "26년");
+  const categories = { 해외주식: Array(13).fill(0), 공모주: Array(13).fill(0), 구매대행: Array(13).fill(0), 카테크: Array(13).fill(0) };
+  if (!yearCell) return categories;
+
+  const labelCol = yearCell.c;
+  const valStart = labelCol + 1; // 1월부터
+
+  for (let r = yearCell.r + 1; r < yearCell.r + 8; r++) {
+    const label = trimStr(cell(grid, r, labelCol));
+    let key = null;
+    if (label === "해외주식") key = "해외주식";
+    else if (label === "공모주") key = "공모주";
+    else if (label && label.startsWith("구매대행")) key = "구매대행";
+    else if (label === "카테크") key = "카테크";
+    if (!key) continue;
+    for (let m = 1; m <= 12; m++) {
+      categories[key][m] = toNum(cell(grid, r, valStart + m - 1));
+    }
+  }
+  return categories;
+}
+
+// ============================================
+// 파서 3: 신형 포맷 월 시트 (2026-06 ~ 08)
+// ============================================
+function parseNewFormatMonth(grid) {
+  const out = { income: 0, expense: 0, savings: 0, categories: {} };
+
+  // 상단 요약 블록: 총 수입 / 총 지출 / 저축 / 투자 / 잔 액
+  const sumHeader = findCell(grid, "총 수입");
+  if (sumHeader) {
+    const hRow = grid[sumHeader.r];
+    const cIncome = sumHeader.c;
+    const cExpense = findColInRow(hRow, "총 지출");
+    const cSavings = findColInRow(hRow, (v) => trimStr(v) === "저축 / 투자" || trimStr(v) === "저축/투자");
+    const valRow = sumHeader.r + 1;
+    out.income = toNum(cell(grid, valRow, cIncome));
+    if (cExpense >= 0) out.expense = toNum(cell(grid, valRow, cExpense));
+    if (cSavings >= 0) out.savings = toNum(cell(grid, valRow, cSavings));
+  }
+
+  // 고정지출 + 변동지출 헤더: 항목/항목/설정금액/실제금액/차이 .. 카테고리/항목/항목/금액
+  let hRowIdx = -1;
+  for (let r = 0; r < grid.length; r++) {
+    const row = grid[r] || [];
+    if (trimStr(row[0]) === "항목" && trimStr(row[1]) === "항목" && row.some((v) => trimStr(v) === "카테고리")) {
+      hRowIdx = r;
+      break;
+    }
+  }
+  if (hRowIdx >= 0) {
+    const row = grid[hRowIdx];
+    const leftItemCol = 1;
+    const leftActualCol = findColInRow(row, "실제 금액");
+    const rightCatCol = findColInRow(row, "카테고리");
+    let rightAmtCol = -1;
+    for (let c = rightCatCol; c < row.length; c++) {
+      if (trimStr(row[c]) === "금액") rightAmtCol = c;
+    }
+    let lastLeftCat = null;
+    let blankStreak = 0;
+    for (let r = hRowIdx + 1; r < grid.length; r++) {
+      const rr = grid[r] || [];
+      const wideCols = Array.from({ length: rightAmtCol + 1 }, (_, i) => i);
+      if (rowIsBlank(rr, wideCols)) {
+        blankStreak++;
+        if (blankStreak >= 2) break;
+        continue;
+      }
+      blankStreak = 0;
+
+      // "합 계"/"합계" 행을 만나면 그 섹션(왼쪽 또는 전체) 종료 신호로 취급
+      const c0 = trimStr(rr[0]);
+      const cRight = trimStr(rr[rightCatCol]);
+      const cRightItem = trimStr(rr[rightCatCol + 1]) || trimStr(rr[rightCatCol + 2]);
+      const leftIsTotal = c0 && String(c0).includes("합");
+      const rightIsTotal = (cRight && String(cRight).includes("합")) || (cRightItem && String(cRightItem).includes("합"));
+      if (leftIsTotal && rightIsTotal) break; // 양쪽 다 합계면 테이블 끝
+
+      // 왼쪽: 고정지출 (분류가 col0에 있고 항목명이 col1)
+      if (!leftIsTotal) {
+        const catL = c0 || lastLeftCat;
+        if (c0) lastLeftCat = c0;
+        const itemL = trimStr(rr[leftItemCol]);
+        const amtL = toNum(rr[leftActualCol]);
+        if (catL && itemL && amtL) {
+          out.categories[catL] = (out.categories[catL] || 0) + amtL;
+        }
+      }
+      // 오른쪽: 변동/추가 지출
+      if (!rightIsTotal) {
+        const catR = cRight;
+        const amtR = toNum(rr[rightAmtCol]);
+        if (catR && amtR) {
+          out.categories[catR] = (out.categories[catR] || 0) + amtR;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// ============================================
+// 파서 4: 구형 포맷 월 시트 (26년 1~5월)
+// ============================================
+function parseOldFormatMonth(grid) {
+  const out = { income: 0, expense: 0, savings: 0, categories: {} };
+
+  let hRowIdx = -1;
+  for (let r = 0; r < grid.length; r++) {
+    const row = grid[r] || [];
+    if (trimStr(row[1]) === "분류" && trimStr(row[2]) === "제목") {
+      hRowIdx = r;
+      break;
+    }
+  }
+  if (hRowIdx < 0) return out;
+
+  const CAT = 1, ITEM = 2, AMT = 4; // 분류, 제목, 금액(실제)
+  let lastCat = null;
+  let blankStreak = 0;
+
+  for (let r = hRowIdx + 1; r < grid.length; r++) {
+    const row = grid[r] || [];
+    if (rowIsBlank(row, [CAT, ITEM, AMT])) {
+      blankStreak++;
+      if (blankStreak >= 2) break;
+      continue;
+    }
+    blankStreak = 0;
+
+    const rawCat = trimStr(row[CAT]);
+    if (rawCat) lastCat = rawCat;
+    const cat = rawCat || lastCat;
+    const item = trimStr(row[ITEM]);
+    const amt = toNum(row[AMT]);
+    if (!cat || !amt) continue;
+
+    if (cat === "월급") {
+      out.income += amt;
+    } else if (cat.includes("저축") || cat.includes("대출원금")) {
+      out.savings += amt;
+    } else {
+      out.expense += amt;
+      const label = item || cat;
+      out.categories[cat] = (out.categories[cat] || 0) + amt;
+    }
+  }
+  return out;
+}
+
+// ============================================
+// 데이터 로드 + 집계
+// ============================================
+async function loadAll(forceRefresh) {
+  setSyncStatus("불러오는 중…");
+
+  const cacheKey = "gsheet_cache_v1";
+  if (!forceRefresh) {
+    const cached = sessionStorage.getItem(cacheKey);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      state.monthly = parsed.monthly;
+      state.side = parsed.side;
+      renderAll();
+      setSyncStatus("캐시됨 · " + new Date(parsed.ts).toLocaleTimeString("ko-KR"));
+      return;
+    }
+  }
+
+  const sheetNames = [
+    CONFIG.SHEET_NAMES.ANNUAL,
+    CONFIG.SHEET_NAMES.SIDE_BUSINESS,
+    ...CONFIG.MONTHS.map((m) => CONFIG.monthMeta(m).sheetName),
+  ];
+  const grids = await fetchGrids(sheetNames);
+
+  const annual = parseAnnualSummary(grids[CONFIG.SHEET_NAMES.ANNUAL]);
+  const side = parseSideBusiness(grids[CONFIG.SHEET_NAMES.SIDE_BUSINESS]);
+
+  const monthly = {};
+  for (const m of CONFIG.MONTHS) {
+    const meta = CONFIG.monthMeta(m);
+    const grid = grids[meta.sheetName] || [];
+    const parsed = meta.format === "new" ? parseNewFormatMonth(grid) : parseOldFormatMonth(grid);
+
+    // 연간요약 시트에 값이 있으면 그걸 우선 사용 (더 신뢰도 높음), 없으면 월 시트에서 계산한 값 사용
+    const a = annual ? annual[m] : null;
+    monthly[m] = {
+      income: a && a.income ? a.income : parsed.income,
+      expense: a && a.expense ? a.expense : parsed.expense,
+      savings: a && a.savings ? a.savings : parsed.savings,
+      categories: parsed.categories,
+    };
+  }
+
+  state.monthly = monthly;
+  state.side = side;
+  sessionStorage.setItem(cacheKey, JSON.stringify({ monthly, side, ts: Date.now() }));
+
+  renderAll();
+  setSyncStatus("방금 동기화됨 · " + new Date().toLocaleTimeString("ko-KR"));
+}
+
+// ============================================
+// 렌더링
+// ============================================
+function renderAll() {
+  renderMonthRibbon();
+  renderKpis(state.selectedMonth);
+  renderTrendChart();
+  renderCatChart(state.selectedMonth);
+  renderSideChart();
+  renderRateChart();
+}
+
+function renderMonthRibbon() {
+  const wrap = $("#monthRibbon");
+  wrap.innerHTML = "";
+  const maxVal = Math.max(
+    1,
+    ...CONFIG.MONTHS.flatMap((m) => [state.monthly[m]?.income || 0, state.monthly[m]?.expense || 0])
+  );
+  CONFIG.MONTHS.forEach((m) => {
+    const d = state.monthly[m] || {};
+    const hasData = (d.income || 0) > 0 || (d.expense || 0) > 0;
+    const net = (d.income || 0) - (d.expense || 0) - (d.savings || 0);
+    const tile = document.createElement("div");
+    tile.className = "month-tile" + (m === state.selectedMonth ? " active" : "") + (hasData ? "" : " empty");
+    const incH = Math.max(2, ((d.income || 0) / maxVal) * 34);
+    const expH = Math.max(2, ((d.expense || 0) / maxVal) * 34);
+    tile.innerHTML = `
+      <div class="m-label">${m}월</div>
+      <div class="m-bar">
+        <div style="height:${incH}px;background:var(--income)"></div>
+        <div style="height:${expH}px;background:var(--expense)"></div>
+      </div>
+      <div class="m-net" style="color:${net >= 0 ? "var(--income)" : "var(--expense)"}">${hasData ? fmtShort(net) : "–"}</div>
+    `;
+    tile.addEventListener("click", () => {
+      state.selectedMonth = m;
+      renderMonthRibbon();
+      renderKpis(m);
+      renderCatChart(m);
+    });
+    wrap.appendChild(tile);
+  });
+}
+
+function renderKpis(m) {
+  const d = state.monthly[m] || {};
+  const income = d.income || 0;
+  const expense = d.expense || 0;
+  const savings = d.savings || 0;
+  const balance = income - expense - savings;
+  const rate = income ? ((savings / income) * 100).toFixed(1) : "0.0";
+
+  const cards = [
+    { label: "총 수입", value: income, color: "var(--income)" },
+    { label: "총 지출", value: expense, color: "var(--expense)" },
+    { label: "저축/투자", value: savings, color: "var(--savings)", sub: `저축률 ${rate}%` },
+    { label: "잔액", value: balance, color: balance >= 0 ? "var(--income)" : "var(--expense)" },
+  ];
+
+  $("#kpiGrid").innerHTML = cards
+    .map(
+      (c) => `
+    <div class="kpi-card">
+      <div class="label"><span class="dot" style="background:${c.color}"></span>${m}월 ${c.label}</div>
+      <div class="value">${fmtWon(c.value)}</div>
+      <div class="delta">${c.sub || ""}</div>
+    </div>`
+    )
+    .join("");
+}
+
+function destroyChart(key) {
+  if (state.charts[key]) {
+    state.charts[key].destroy();
+    delete state.charts[key];
+  }
+}
+
+const chartDefaults = {
+  color: "#8891a3",
+  font: { family: "-apple-system, sans-serif", size: 11 },
+};
+
+function renderTrendChart() {
+  destroyChart("trend");
+  const labels = CONFIG.MONTHS.map((m) => `${m}월`);
+  const income = CONFIG.MONTHS.map((m) => state.monthly[m]?.income || 0);
+  const expense = CONFIG.MONTHS.map((m) => state.monthly[m]?.expense || 0);
+  const savings = CONFIG.MONTHS.map((m) => state.monthly[m]?.savings || 0);
+
+  state.charts.trend = new Chart($("#trendChart"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label: "수입", data: income, backgroundColor: "#57b98d", borderRadius: 4, order: 2 },
+        { label: "지출", data: expense, backgroundColor: "#e2596b", borderRadius: 4, order: 2 },
+        {
+          label: "저축/투자",
+          data: savings,
+          type: "line",
+          borderColor: "#d8a94a",
+          backgroundColor: "#d8a94a",
+          tension: 0.35,
+          order: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: "#8891a3", font: chartDefaults.font, usePointStyle: true } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtWon(ctx.raw)}` } },
+      },
+      scales: {
+        x: { grid: { color: "#20242e" }, ticks: { color: "#8891a3" } },
+        y: {
+          grid: { color: "#20242e" },
+          ticks: { color: "#8891a3", callback: (v) => fmtShort(v) },
+        },
+      },
+    },
+  });
+}
+
+function renderCatChart(m) {
+  destroyChart("cat");
+  const cats = state.monthly[m]?.categories || {};
+  const entries = Object.entries(cats)
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8);
+
+  $("#catTitle").innerHTML = `${m}월 지출 카테고리 <span class="tag">상위 ${entries.length}개</span>`;
+
+  const total = entries.reduce((s, [, v]) => s + v, 0) || 1;
+  $("#catList").innerHTML = entries
+    .map(
+      ([name, val]) => `
+    <div class="cat-row">
+      <div class="name">${name}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(val / total) * 100}%"></div></div>
+      <div class="amt">${fmtShort(val)}</div>
+    </div>`
+    )
+    .join("");
+
+  state.charts.cat = new Chart($("#catChart"), {
+    type: "doughnut",
+    data: {
+      labels: entries.map((e) => e[0]),
+      datasets: [
+        {
+          data: entries.map((e) => e[1]),
+          backgroundColor: ["#e2596b", "#d8a94a", "#6f8fd6", "#57b98d", "#c77dff", "#4bc0c0", "#f39c6b", "#8891a3"],
+          borderWidth: 0,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${fmtWon(ctx.raw)}` } } },
+    },
+  });
+}
+
+function renderSideChart() {
+  destroyChart("side");
+  const labels = CONFIG.MONTHS.map((m) => `${m}월`);
+  const side = state.side || {};
+  const mk = (key) => CONFIG.MONTHS.map((m) => (side[key] ? side[key][m] || 0 : 0));
+
+  state.charts.side = new Chart($("#sideChart"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label: "구매대행", data: mk("구매대행"), backgroundColor: "#6f8fd6", stack: "s" },
+        { label: "해외주식", data: mk("해외주식"), backgroundColor: "#57b98d", stack: "s" },
+        { label: "공모주", data: mk("공모주"), backgroundColor: "#d8a94a", stack: "s" },
+        { label: "카테크", data: mk("카테크"), backgroundColor: "#c77dff", stack: "s" },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: "#8891a3", font: chartDefaults.font, usePointStyle: true } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtWon(ctx.raw)}` } },
+      },
+      scales: {
+        x: { stacked: true, grid: { color: "#20242e" }, ticks: { color: "#8891a3" } },
+        y: { stacked: true, grid: { color: "#20242e" }, ticks: { color: "#8891a3", callback: (v) => fmtShort(v) } },
+      },
+    },
+  });
+}
+
+function renderRateChart() {
+  destroyChart("rate");
+  const labels = CONFIG.MONTHS.map((m) => `${m}월`);
+  const rates = CONFIG.MONTHS.map((m) => {
+    const d = state.monthly[m] || {};
+    return d.income ? Number(((d.savings / d.income) * 100).toFixed(1)) : 0;
+  });
+
+  state.charts.rate = new Chart($("#rateChart"), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "저축률(%)",
+          data: rates,
+          borderColor: "#d8a94a",
+          backgroundColor: "rgba(216,169,74,0.15)",
+          fill: true,
+          tension: 0.35,
+          pointBackgroundColor: "#d8a94a",
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `저축률: ${ctx.raw}%` } } },
+      scales: {
+        x: { grid: { color: "#20242e" }, ticks: { color: "#8891a3" } },
+        y: { grid: { color: "#20242e" }, ticks: { color: "#8891a3", callback: (v) => v + "%" } },
+      },
+    },
+  });
+}
+
+// ============================================
+// 초기화
+// ============================================
+window.addEventListener("load", initAuth);
