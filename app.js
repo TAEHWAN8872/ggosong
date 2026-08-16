@@ -1115,17 +1115,29 @@ function renderAssetPanel(sel) {
   titleEl.textContent = `${targetMonth}월 자산 현황`;
   tagEl.textContent = sel === "total" ? `최신 데이터(${targetMonth}월) 기준` : "현금 · 자산 · 부동산 스냅샷";
 
+  const reDetail = targetMonth ? state.monthly[targetMonth]?.realEstateDetail : null;
+  const reProfitTotal = reDetail && reDetail.length ? reDetail.reduce((s, p) => s + p.profit, 0) : null;
+
   const cards = [
     { label: "금융자산", value: snap.financial, color: "var(--accent)" },
     { label: "부동산", value: snap.realEstateTotal, color: "var(--savings)" },
     { label: "총 자산(순자산)", value: snap.netWorth, color: "var(--income)" },
   ];
+  if (reProfitTotal !== null) {
+    cards.push({
+      label: "예상 자산(부동산 수익)",
+      value: snap.netWorth + reProfitTotal,
+      color: "var(--forecast)",
+      sub: `총자산 + 부동산 수익 ${fmtWon(reProfitTotal)}`,
+    });
+  }
   summaryEl.innerHTML = cards
     .map(
       (c) => `
     <div class="kpi-card">
       <div class="label"><span class="dot" style="background:${c.color}"></span>${c.label}</div>
       <div class="value">${fmtWon(c.value)}</div>
+      ${c.sub ? `<div class="delta">${c.sub}</div>` : ""}
     </div>`
     )
     .join("");

@@ -18,6 +18,7 @@
   --expense:#d63653;
   --savings:#c08a2e;
   --accent:#4a6cc0;
+  --forecast:#8a5cf6;
   --radius:10px;
 }
 *{box-sizing:border-box;}
@@ -118,7 +119,7 @@ main{max-width:1180px; margin:0 auto; padding:22px 24px;}
 .panel h3 span.tag{font-size:10px; font-weight:600; color:var(--muted-2); background:var(--surface-2); padding:3px 8px; border-radius:20px;}
 .chart-wrap{position:relative; height:260px;}
 .chart-wrap.tall{height:320px;}
-.asset-summary{grid-template-columns:repeat(3,1fr); margin-bottom:16px;}
+.asset-summary{grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); margin-bottom:16px;}
 
 /* ---- 카테고리 리스트 ---- */
 .cat-list{display:flex; flex-direction:column; gap:6px; margin-top:8px; overflow-y:auto;}
