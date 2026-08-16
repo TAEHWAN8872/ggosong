@@ -191,6 +191,7 @@ function parseNewFormatMonth(grid, ranges) {
     }
 
     // 고정지출: 실제 시트 수식과 동일한 행 범위만 집계 (예: D13:D31)
+    let fixedSum = 0;
     if (ranges.fixedRows) {
       const [r1, r2] = ranges.fixedRows;
       let lastCat = null;
@@ -201,6 +202,7 @@ function parseNewFormatMonth(grid, ranges) {
         const cat = rawCat || lastCat;
         const item = trimStr(rr[leftItemCol]);
         const amt = toNum(rr[leftActualCol]);
+        fixedSum += amt;
         if (cat && item && amt) {
           out.categories[cat] = (out.categories[cat] || 0) + amt;
         }
@@ -208,16 +210,23 @@ function parseNewFormatMonth(grid, ranges) {
     }
 
     // 변동지출: 실제 시트 수식과 동일한 행 범위만 집계 (예: J13:J36)
+    let varSum = 0;
     if (ranges.varRows && rightCatCol >= 0 && rightAmtCol >= 0) {
       const [r1, r2] = ranges.varRows;
       for (let sheetRow = r1; sheetRow <= r2; sheetRow++) {
         const rr = grid[sheetRow - 1] || [];
         const cat = trimStr(rr[rightCatCol]);
         const amt = toNum(rr[rightAmtCol]);
+        varSum += amt;
         if (cat && amt) {
           out.categories[cat] = (out.categories[cat] || 0) + amt;
         }
       }
+    }
+
+    // 총 지출: 헤더 텍스트 인식에 기대지 않고, 실제 시트 수식(D+J열 범위 합)과 동일하게 직접 계산
+    if (ranges.fixedRows || ranges.varRows) {
+      out.expense = fixedSum + varSum;
     }
 
     // 저축: 별도 분류열 없이 B열(항목명)에 바로 D열(실제 금액)이 붙는 구조
