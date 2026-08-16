@@ -471,18 +471,16 @@ function renderMonthRibbon() {
 function renderKpis(sel) {
   const d = getSelectedData(sel);
   const label = sel === "total" ? "종합" : `${sel}월`;
-  const income = d.income || 0;
+  const sideIncome = getSideIncome(sel);
+  const income = (d.income || 0) + sideIncome;
   const expense = d.expense || 0;
   const savings = d.savings || 0;
-  const balance = income - expense - savings;
   const rate = income ? ((savings / income) * 100).toFixed(1) : "0.0";
-  const sideIncome = getSideIncome(sel);
 
   const cards = [
     { label: "총 수입", value: income, color: "var(--income)" },
     { label: "총 지출", value: expense, color: "var(--expense)" },
     { label: "저축/투자", value: savings, color: "var(--savings)", sub: `저축률 ${rate}%` },
-    { label: "잔액", value: balance, color: balance >= 0 ? "var(--income)" : "var(--expense)" },
     { label: "부업 수익", value: sideIncome, color: "var(--accent)" },
   ];
 
@@ -573,7 +571,7 @@ function renderCatChart(sel) {
         ? items
             .map(
               ([item, amt]) => `
-        <div class="cat-item-row"><span>${item}</span><span class="cat-item-amt">${fmtShort(amt)}</span></div>`
+        <div class="cat-item-row"><span>${item}</span><span class="cat-item-amt">${fmtWon(amt)}</span></div>`
             )
             .join("")
         : `<div class="cat-item-empty">세부 내역 없음</div>`;
@@ -582,7 +580,7 @@ function renderCatChart(sel) {
         <div class="cat-row" data-cat="${name}">
           <div class="name">${name}</div>
           <div class="bar-track"><div class="bar-fill" style="width:${(val / total) * 100}%"></div></div>
-          <div class="amt">${fmtShort(val)}</div>
+          <div class="amt">${fmtWon(val)}</div>
           <div class="expand-icon">${isOpen ? "▲" : "▼"}</div>
         </div>
         <div class="cat-detail ${isOpen ? "" : "hidden"}">${itemsHtml}</div>
