@@ -406,7 +406,83 @@ const ASSET_SNAPSHOT_CONFIG = {
       { name: "반도빌리지", ref: "L28" },
     ],
   },
-  // 3~12월 셀 참조는 확인되는 대로 여기에 추가
+  3: {
+    cash: [
+      { name: "개인주식", ref: "O21" },
+      { name: "케이뱅크", ref: "K18" },
+      { name: "해외주식", ref: "K19" },
+      { name: "증권사 예수금", ref: "K17+N19+O19+P19" },
+    ],
+    assets: [
+      { name: "주택원금", ref: "K20" },
+      { name: "꼬 주택청약", ref: "K21" },
+      { name: "송 주택청약", ref: "K22" },
+      { name: "연금저축", ref: "K23" },
+      { name: "꼬 퇴직금", ref: "K24" },
+    ],
+    realEstate: [
+      { name: "라포리엘", ref: "L27" },
+      { name: "반도빌리지", ref: "L28" },
+    ],
+  },
+  4: {
+    cash: [
+      { name: "개인주식", ref: "K17" },
+      { name: "케이뱅크", ref: "K18" },
+      { name: "해외주식", ref: "K19" },
+      { name: "증권사 예수금", ref: "N19+P19+O19" },
+    ],
+    assets: [
+      { name: "주택원금", ref: "K21" },
+      { name: "꼬 주택청약", ref: "K22" },
+      { name: "송 주택청약", ref: "K23" },
+      { name: "연금저축", ref: "K24" },
+      { name: "꼬 퇴직금", ref: "K25" },
+    ],
+    realEstate: [
+      { name: "라포리엘", ref: "L28" },
+      { name: "반도빌리지", ref: "L29" },
+    ],
+  },
+  5: {
+    cash: [
+      { name: "개인주식", ref: "K17" },
+      { name: "케이뱅크", ref: "K18" },
+      { name: "해외주식", ref: "K19" },
+      { name: "증권사 예수금", ref: "N19+P19+O19" },
+    ],
+    assets: [
+      { name: "주택원금", ref: "K21" },
+      { name: "꼬 주택청약", ref: "K22" },
+      { name: "송 주택청약", ref: "K23" },
+      { name: "연금저축", ref: "K24" },
+      { name: "꼬 퇴직금", ref: "K25" },
+    ],
+    realEstate: [
+      { name: "라포리엘", ref: "L28" },
+      { name: "반도빌리지", ref: "L29" },
+    ],
+  },
+  6: {
+    cash: [
+      { name: "개인주식", ref: "C57" },
+      { name: "케이뱅크", ref: "C58" },
+      { name: "해외주식", ref: "C59" },
+      { name: "증권사 예수금", ref: "C60" },
+    ],
+    assets: [
+      { name: "주택원금", ref: "C61" },
+      { name: "꼬 주택청약", ref: "C62" },
+      { name: "송 주택청약", ref: "C63" },
+      { name: "연금저축", ref: "C64" },
+      { name: "꼬 퇴직금", ref: "C65" },
+    ],
+    realEstate: [
+      { name: "라포리엘", ref: "H57" },
+      { name: "반도빌리지", ref: "H58" },
+    ],
+  },
+  // 7~12월 셀 참조는 확인되는 대로 여기에 추가
 };
 
 // ============================================
@@ -422,7 +498,23 @@ const REAL_ESTATE_DETAIL_CONFIG = {
     { name: "라포리엘", investRef: "L27", sellRef: "M27", buyRef: "N27", profitDivisor: 2 },
     { name: "반도빌리지", investRef: "L28", sellRef: "M28", buyRef: "N28" },
   ],
-  // 3~12월 셀 참조는 확인되는 대로 여기에 추가
+  3: [
+    { name: "라포리엘", investRef: "L27", sellRef: "M27", buyRef: "N27", profitDivisor: 2 },
+    { name: "반도빌리지", investRef: "L28", sellRef: "M28", buyRef: "N28" },
+  ],
+  4: [
+    { name: "라포리엘", investRef: "L28", sellRef: "M28", buyRef: "N28", profitDivisor: 2 },
+    { name: "반도빌리지", investRef: "L29", sellRef: "M29", buyRef: "N29" },
+  ],
+  5: [
+    { name: "라포리엘", investRef: "L28", sellRef: "M28", buyRef: "N28", profitDivisor: 2 },
+    { name: "반도빌리지", investRef: "L29", sellRef: "M29", buyRef: "N29" },
+  ],
+  6: [
+    { name: "라포리엘", investRef: "H57", sellRef: "F57", buyRef: "G57", profitDivisor: 2 },
+    { name: "반도빌리지", investRef: "H58", sellRef: "F58", buyRef: "G58" },
+  ],
+  // 7~12월 셀 참조는 확인되는 대로 여기에 추가
 };
 
 function parseRealEstateDetail(grid, refConfig) {
