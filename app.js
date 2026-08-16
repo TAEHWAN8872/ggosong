@@ -659,10 +659,16 @@ const amountLabelPlugin = {
         if (!ds || ds.type === "line") return; // 선 그래프(저축/투자 추이 등)는 제외
         const meta = chart.getDatasetMeta(dsIndex);
         if (!meta || meta.hidden) return;
+        // 값은 chart.data.datasets[].data 를 다시 읽지 않고, 차트를 만들 때 넘겨준
+        // 순수 숫자 배열(opt.values)에서 가져옴 — Chart.js가 내부적으로 data 배열에
+        // 반응형 래퍼를 씌우는 경우가 있어, 그걸 직접 읽으면 숫자로 변환되지 않는
+        // 값이 나와 렌더링이 중간에 죽는 문제가 있었음
+        const valuesSrc = Array.isArray(opt.values) ? opt.values : opt.values && opt.values[dsIndex];
         meta.data.forEach((el, i) => {
           if (!el) return;
-          const val = ds.data[i];
-          if (val === null || val === undefined || val === 0 || !isFinite(val)) return;
+          const raw = valuesSrc ? valuesSrc[i] : ds.data[i];
+          const val = typeof raw === "number" ? raw : Number(raw);
+          if (val === null || val === undefined || val === 0 || Number.isNaN(val) || !isFinite(val)) return;
           const text = formatter(val);
           if (isHorizontal) {
             ctx.textAlign = el.x >= 0 ? "left" : "right";
@@ -761,7 +767,7 @@ function renderTrendChart(sel) {
         plugins: {
           legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
           tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtWon(ctx.raw)}` } },
-          amountLabels: { enabled: true, datasets: [0, 1] },
+          amountLabels: { enabled: true, datasets: [0, 1], values: { 0: income, 1: expense } },
         },
         scales: {
           x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
@@ -799,6 +805,7 @@ function renderTrendChart(sel) {
 
   let pctValues = null;
   let curDatasetIndex = 0;
+  let amountValuesByDs = { 0: curData };
 
   if (prev) {
     const prevData = [prevIncome, prev.expense || 0, prev.savings || 0];
@@ -809,6 +816,7 @@ function renderTrendChart(sel) {
       borderRadius: 4,
     });
     curDatasetIndex = 1;
+    amountValuesByDs = { 0: prevData, 1: curData };
     pctValues = curData.map((v, i) => (prevData[i] ? ((v - prevData[i]) / Math.abs(prevData[i])) * 100 : null));
   }
 
@@ -825,7 +833,7 @@ function renderTrendChart(sel) {
         legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
         tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtWon(ctx.raw)}` } },
         pctLabels: { values: pctValues, datasetIndex: curDatasetIndex },
-        amountLabels: { enabled: true },
+        amountLabels: { enabled: true, values: amountValuesByDs },
       },
       scales: {
         x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
@@ -979,7 +987,7 @@ function renderSideChart(sel) {
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: { label: (ctx) => fmtWon(ctx.raw) } },
-        amountLabels: { enabled: true },
+        amountLabels: { enabled: true, values },
       },
       scales: {
         x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
@@ -1092,13 +1100,14 @@ function renderRateChart(sel) {
 
   titleEl.textContent = `${sel}월 저축 카테고리`;
   tagEl.textContent = `총 ${entries.length}개`;
-  const maxSavingsVal = Math.max(...entries.map(([, v]) => v), 1);
+  const savingsValues = entries.map(([, v]) => v);
+  const maxSavingsVal = Math.max(...savingsValues, 1);
 
   state.charts.rate = new Chart($("#rateChart"), {
     type: "bar",
     data: {
       labels: entries.map(([name]) => name),
-      datasets: [{ data: entries.map(([, v]) => v), backgroundColor: "#c08a2e", borderRadius: 4 }],
+      datasets: [{ data: savingsValues, backgroundColor: "#c08a2e", borderRadius: 4 }],
     },
     options: {
       indexAxis: "y",
@@ -1107,7 +1116,7 @@ function renderRateChart(sel) {
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: { label: (ctx) => fmtWon(ctx.raw) } },
-        amountLabels: { enabled: true, formatter: fmtWon },
+        amountLabels: { enabled: true, formatter: fmtWon, values: savingsValues },
       },
       scales: {
         x: { grid: { color: "#e2e5eb" }, suggestedMax: maxSavingsVal * 1.25, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
@@ -1174,13 +1183,14 @@ function renderAssetPanel(sel) {
     ...snap.assets.map((i) => ({ ...i, color: "#2f9d6f" })),
     ...snap.realEstate.map((i) => ({ ...i, color: "#c08a2e" })),
   ].filter((i) => i.value);
-  const maxAssetVal = Math.max(...items.map((i) => i.value), 1);
+  const assetValues = items.map((i) => i.value);
+  const maxAssetVal = Math.max(...assetValues, 1);
 
   state.charts.asset = new Chart($("#assetChart"), {
     type: "bar",
     data: {
       labels: items.map((i) => i.name),
-      datasets: [{ data: items.map((i) => i.value), backgroundColor: items.map((i) => i.color), borderRadius: 4 }],
+      datasets: [{ data: assetValues, backgroundColor: items.map((i) => i.color), borderRadius: 4 }],
     },
     options: {
       indexAxis: "y",
@@ -1190,7 +1200,7 @@ function renderAssetPanel(sel) {
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: { label: (ctx) => fmtWon(ctx.raw) } },
-        amountLabels: { enabled: true, formatter: fmtWon },
+        amountLabels: { enabled: true, formatter: fmtWon, values: assetValues },
       },
       scales: {
         x: { grid: { color: "#e2e5eb" }, suggestedMax: maxAssetVal * 1.35, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
