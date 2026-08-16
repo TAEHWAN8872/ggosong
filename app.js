@@ -383,7 +383,7 @@ const ASSET_SNAPSHOT_CONFIG = {
 // ============================================
 const REAL_ESTATE_DETAIL_CONFIG = {
   1: [
-    { name: "라포리엘", investRef: "L27", sellRef: "M27", buyRef: "N27" },
+    { name: "라포리엘", investRef: "L27", sellRef: "M27", buyRef: "N27", profitDivisor: 2 },
     { name: "반도빌리지", investRef: "L28", sellRef: "M28", buyRef: "N28" },
   ],
   // 2~12월 셀 참조는 확인되는 대로 여기에 추가
@@ -395,7 +395,8 @@ function parseRealEstateDetail(grid, refConfig) {
     const invest = getCellValue(grid, c.investRef);
     const sell = getCellValue(grid, c.sellRef);
     const buy = getCellValue(grid, c.buyRef);
-    const profit = sell - buy;
+    const divisor = c.profitDivisor || 1;
+    const profit = (sell - buy) / divisor;
     const roi = invest ? (profit / invest) * 100 : null;
     return { name: c.name, invest, sell, buy, profit, roi };
   });
@@ -975,8 +976,18 @@ function renderRateChart(sel) {
     titleEl.textContent = `${sel}월 부동산 현황`;
     tagEl.textContent = `총 ${reDetail.length}건`;
 
-    listEl.innerHTML = reDetail
-      .map((p) => {
+    const totalProfit = reDetail.reduce((s, p) => s + p.profit, 0);
+    const totalColor = totalProfit >= 0 ? "var(--income)" : "var(--expense)";
+    const totalCardHtml = `
+      <div class="re-card re-total">
+        <div class="re-name">최종 부동산 수익 합계</div>
+        <div class="re-total-val" style="color:${totalColor}">${fmtWon(totalProfit)}</div>
+      </div>`;
+
+    listEl.innerHTML =
+      totalCardHtml +
+      reDetail
+        .map((p) => {
         const roiText = p.roi === null || p.roi === undefined || !isFinite(p.roi) ? "-" : `${p.roi >= 0 ? "+" : ""}${p.roi.toFixed(1)}%`;
         const roiColor = p.roi === null || p.roi === undefined || !isFinite(p.roi) ? "var(--muted)" : p.roi >= 0 ? "var(--income)" : "var(--expense)";
         const profitColor = p.profit >= 0 ? "var(--income)" : "var(--expense)";
