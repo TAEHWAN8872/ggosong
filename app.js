@@ -248,6 +248,14 @@ function parseOldFormatMonth(grid, ranges) {
 
   const CAT = 1, ITEM = 2, AMT = 4; // 분류, 제목, 금액(실제) — B, C, E열
 
+  // 수입: "월급" 행은 지출 범위 밖에 있을 수 있으므로 표 전체를 훑어서 찾음
+  for (let r = 0; r < grid.length; r++) {
+    const row = grid[r] || [];
+    if (trimStr(row[CAT]) === "월급") {
+      out.income += toNum(row[AMT]);
+    }
+  }
+
   // 지출: 실제 시트 수식과 동일한 행 범위(들)만 집계, excludeRows는 제외
   const excludeSet = new Set(ranges.excludeRows || []);
   let lastCat = null;
@@ -260,11 +268,7 @@ function parseOldFormatMonth(grid, ranges) {
       const cat = rawCat || lastCat;
       const item = trimStr(row[ITEM]);
       const amt = toNum(row[AMT]);
-      if (!cat || !amt) continue;
-      if (cat === "월급") {
-        out.income += amt; // 혹시 이 범위 안에 월급 행이 섞여 있으면 지출이 아닌 수입으로 분류
-        continue;
-      }
+      if (!cat || !amt || cat === "월급") continue;
       out.expense += amt;
       out.categories[cat] = (out.categories[cat] || 0) + amt;
     }
