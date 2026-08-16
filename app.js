@@ -154,8 +154,8 @@ function parseSideBusiness(grid) {
 // ============================================
 // 파서 3: 신형 포맷 월 시트 (2026-06 ~ 08)
 // ============================================
-function parseNewFormatMonth(grid) {
-  const out = { income: 0, expense: 0, savings: 0, categories: {} };
+function parseNewFormatMonth(grid, ranges) {
+  const out = { income: 0, expense: 0, savings: 0, categories: {}, savingsCategories: {} };
 
   // 상단 요약 블록: 총 수입 / 총 지출 / 저축 / 투자 / 잔 액
   const sumHeader = findCell(grid, "총 수입");
@@ -170,7 +170,7 @@ function parseNewFormatMonth(grid) {
     if (cSavings >= 0) out.savings = toNum(cell(grid, valRow, cSavings));
   }
 
-  // 고정지출 + 변동지출 헤더: 항목/항목/설정금액/실제금액/차이 .. 카테고리/항목/항목/금액
+  // 고정지출 + 변동지출 헤더 위치에서 열(컬럼) 위치만 동적으로 찾음: 항목/항목/설정금액/실제금액/차이 .. 카테고리/항목/항목/금액
   let hRowIdx = -1;
   for (let r = 0; r < grid.length; r++) {
     const row = grid[r] || [];
@@ -179,53 +179,65 @@ function parseNewFormatMonth(grid) {
       break;
     }
   }
-  if (hRowIdx >= 0) {
+  if (hRowIdx >= 0 && ranges) {
     const row = grid[hRowIdx];
+    const leftCatCol = 0;
     const leftItemCol = 1;
     const leftActualCol = findColInRow(row, "실제 금액");
     const rightCatCol = findColInRow(row, "카테고리");
     let rightAmtCol = -1;
     for (let c = rightCatCol; c < row.length; c++) {
-      if (trimStr(row[c]) === "금액") rightAmtCol = c;
+      if (trimStr(row[c]) === "금액") { rightAmtCol = c; break; }
     }
-    let lastLeftCat = null;
-    let blankStreak = 0;
-    for (let r = hRowIdx + 1; r < grid.length; r++) {
-      const rr = grid[r] || [];
-      const wideCols = Array.from({ length: rightAmtCol + 1 }, (_, i) => i);
-      if (rowIsBlank(rr, wideCols)) {
-        blankStreak++;
-        if (blankStreak >= 2) break;
-        continue;
-      }
-      blankStreak = 0;
 
-      // "합 계"/"합계" 행을 만나면 그 섹션(왼쪽 또는 전체) 종료 신호로 취급
-      const c0 = trimStr(rr[0]);
-      const cRight = trimStr(rr[rightCatCol]);
-      const cRightItem = trimStr(rr[rightCatCol + 1]) || trimStr(rr[rightCatCol + 2]);
-      const leftIsTotal = c0 && String(c0).includes("합");
-      const rightIsTotal = (cRight && String(cRight).includes("합")) || (cRightItem && String(cRightItem).includes("합"));
-      if (leftIsTotal && rightIsTotal) break; // 양쪽 다 합계면 테이블 끝
-
-      // 왼쪽: 고정지출 (분류가 col0에 있고 항목명이 col1)
-      if (!leftIsTotal) {
-        const catL = c0 || lastLeftCat;
-        if (c0) lastLeftCat = c0;
-        const itemL = trimStr(rr[leftItemCol]);
-        const amtL = toNum(rr[leftActualCol]);
-        if (catL && itemL && amtL) {
-          out.categories[catL] = (out.categories[catL] || 0) + amtL;
+    // 고정지출: 실제 시트 수식과 동일한 행 범위만 집계 (예: D13:D31)
+    if (ranges.fixedRows) {
+      const [r1, r2] = ranges.fixedRows;
+      let lastCat = null;
+      for (let sheetRow = r1; sheetRow <= r2; sheetRow++) {
+        const rr = grid[sheetRow - 1] || [];
+        const rawCat = trimStr(rr[leftCatCol]);
+        if (rawCat) lastCat = rawCat;
+        const cat = rawCat || lastCat;
+        const item = trimStr(rr[leftItemCol]);
+        const amt = toNum(rr[leftActualCol]);
+        if (cat && item && amt) {
+          out.categories[cat] = (out.categories[cat] || 0) + amt;
         }
       }
-      // 오른쪽: 변동/추가 지출
-      if (!rightIsTotal) {
-        const catR = cRight;
-        const amtR = toNum(rr[rightAmtCol]);
-        if (catR && amtR) {
-          out.categories[catR] = (out.categories[catR] || 0) + amtR;
+    }
+
+    // 변동지출: 실제 시트 수식과 동일한 행 범위만 집계 (예: J13:J36)
+    if (ranges.varRows && rightCatCol >= 0 && rightAmtCol >= 0) {
+      const [r1, r2] = ranges.varRows;
+      for (let sheetRow = r1; sheetRow <= r2; sheetRow++) {
+        const rr = grid[sheetRow - 1] || [];
+        const cat = trimStr(rr[rightCatCol]);
+        const amt = toNum(rr[rightAmtCol]);
+        if (cat && amt) {
+          out.categories[cat] = (out.categories[cat] || 0) + amt;
         }
       }
+    }
+
+    // 저축: 고정지출표와 같은 구조(A열=분류, B열=항목, D열=금액)가 이어진다고 가정
+    if (ranges.savingsRows) {
+      const [r1, r2] = ranges.savingsRows;
+      let lastCat = null;
+      let sum = 0;
+      for (let sheetRow = r1; sheetRow <= r2; sheetRow++) {
+        const rr = grid[sheetRow - 1] || [];
+        const rawCat = trimStr(rr[leftCatCol]);
+        if (rawCat) lastCat = rawCat;
+        const cat = rawCat || lastCat;
+        const item = trimStr(rr[leftItemCol]);
+        const amt = toNum(rr[leftActualCol]);
+        sum += amt;
+        if (cat && item && amt) {
+          out.savingsCategories[cat] = (out.savingsCategories[cat] || 0) + amt;
+        }
+      }
+      if (!out.savings) out.savings = sum;
     }
   }
   return out;
@@ -234,49 +246,53 @@ function parseNewFormatMonth(grid) {
 // ============================================
 // 파서 4: 구형 포맷 월 시트 (26년 1~5월)
 // ============================================
-function parseOldFormatMonth(grid) {
-  const out = { income: 0, expense: 0, savings: 0, categories: {} };
+function parseOldFormatMonth(grid, ranges) {
+  const out = { income: 0, expense: 0, savings: 0, categories: {}, savingsCategories: {} };
+  if (!ranges) return out;
 
-  let hRowIdx = -1;
-  for (let r = 0; r < grid.length; r++) {
-    const row = grid[r] || [];
-    if (trimStr(row[1]) === "분류" && trimStr(row[2]) === "제목") {
-      hRowIdx = r;
-      break;
-    }
-  }
-  if (hRowIdx < 0) return out;
+  const CAT = 1, ITEM = 2, AMT = 4; // 분류, 제목, 금액(실제) — B, C, E열
 
-  const CAT = 1, ITEM = 2, AMT = 4; // 분류, 제목, 금액(실제)
+  // 지출: 실제 시트 수식과 동일한 행 범위(들)만 집계, excludeRows는 제외
+  const excludeSet = new Set(ranges.excludeRows || []);
   let lastCat = null;
-  let blankStreak = 0;
-
-  for (let r = hRowIdx + 1; r < grid.length; r++) {
-    const row = grid[r] || [];
-    if (rowIsBlank(row, [CAT, ITEM, AMT])) {
-      blankStreak++;
-      if (blankStreak >= 2) break;
-      continue;
-    }
-    blankStreak = 0;
-
-    const rawCat = trimStr(row[CAT]);
-    if (rawCat) lastCat = rawCat;
-    const cat = rawCat || lastCat;
-    const item = trimStr(row[ITEM]);
-    const amt = toNum(row[AMT]);
-    if (!cat || !amt) continue;
-
-    if (cat === "월급") {
-      out.income += amt;
-    } else if (cat.includes("저축") || cat.includes("대출원금")) {
-      out.savings += amt;
-    } else {
+  (ranges.expenseRows || []).forEach(([r1, r2]) => {
+    for (let sheetRow = r1; sheetRow <= r2; sheetRow++) {
+      if (excludeSet.has(sheetRow)) continue;
+      const row = grid[sheetRow - 1] || [];
+      const rawCat = trimStr(row[CAT]);
+      if (rawCat) lastCat = rawCat;
+      const cat = rawCat || lastCat;
+      const item = trimStr(row[ITEM]);
+      const amt = toNum(row[AMT]);
+      if (!cat || !amt) continue;
+      if (cat === "월급") {
+        out.income += amt; // 혹시 이 범위 안에 월급 행이 섞여 있으면 지출이 아닌 수입으로 분류
+        continue;
+      }
       out.expense += amt;
-      const label = item || cat;
       out.categories[cat] = (out.categories[cat] || 0) + amt;
     }
+  });
+
+  // 저축: J~N열(9~13) 두 행 합, 바로 위 행을 항목명 헤더로 가정
+  if (ranges.savingsRows) {
+    const SAV_COLS = [9, 10, 11, 12, 13]; // J,K,L,M,N
+    const headerRow = grid[ranges.savingsRows[0] - 2] || [];
+    let sum = 0;
+    ranges.savingsRows.forEach((sheetRow) => {
+      const row = grid[sheetRow - 1] || [];
+      SAV_COLS.forEach((c) => {
+        const amt = toNum(row[c]);
+        sum += amt;
+        if (amt) {
+          const label = trimStr(headerRow[c]) || `항목${c}`;
+          out.savingsCategories[label] = (out.savingsCategories[label] || 0) + amt;
+        }
+      });
+    });
+    out.savings = sum;
   }
+
   return out;
 }
 
@@ -313,7 +329,8 @@ async function loadAll(forceRefresh) {
   for (const m of CONFIG.MONTHS) {
     const meta = CONFIG.monthMeta(m);
     const grid = grids[meta.sheetName] || [];
-    const parsed = meta.format === "new" ? parseNewFormatMonth(grid) : parseOldFormatMonth(grid);
+    const ranges = CONFIG.RANGES[m];
+    const parsed = meta.format === "new" ? parseNewFormatMonth(grid, ranges) : parseOldFormatMonth(grid, ranges);
 
     // 연간요약 시트에 값이 있으면 그걸 우선 사용 (더 신뢰도 높음), 없으면 월 시트에서 계산한 값 사용
     const a = annual ? annual[m] : null;

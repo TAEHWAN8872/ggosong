@@ -31,4 +31,19 @@ const CONFIG = {
     }
     return { format: "old", sheetName: `26년 ${m}월` };
   },
+
+  // 실제 시트 수식과 정확히 일치하는 범위 (1-indexed, 시트에 보이는 행 번호 그대로)
+  // 구형(1~5월): expenseRows = 지출 SUM 범위(들), excludeRows = 범위 내 제외할 행(5월 -E42 등)
+  //              savingsRows = 저축 SUM에 쓰인 두 행, savingsCols = J~N (9~13, 0-indexed)
+  // 신형(6~8월): fixedRows = 고정지출 D열 범위, varRows = 변동지출 J열 범위, savingsRows = 저축 D열 범위
+  RANGES: {
+    1: { expenseRows: [[11, 86]], savingsRows: [39, 41] },
+    2: { expenseRows: [[11, 87]], savingsRows: [40, 42] },
+    3: { expenseRows: [[11, 87]], savingsRows: [40, 42] },
+    4: { expenseRows: [[11, 75]], savingsRows: [41, 43] },
+    5: { expenseRows: [[11, 45], [54, 75]], excludeRows: [42], savingsRows: [41, 43] },
+    6: { fixedRows: [13, 31], varRows: [13, 36], savingsRows: [45, 52] },
+    7: { fixedRows: [13, 31], varRows: [13, 38], savingsRows: [47, 54] },
+    8: { fixedRows: [13, 31], varRows: [13, 39], savingsRows: [48, 55] },
+  },
 };
