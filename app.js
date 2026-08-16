@@ -7,6 +7,7 @@ const state = {
   selectedMonth: "total", // "total" = 종합(1~8월 합계), 또는 1~8 숫자(해당 월)
   expandedCats: new Set(), // 지출 카테고리 목록에서 펼쳐진 항목들
   charts: {},
+  assetPanelMonth: null, // 종합 탭에서 ◀▶ 로 넘겨보는 자산 현황 대상 월
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -482,7 +483,26 @@ const ASSET_SNAPSHOT_CONFIG = {
       { name: "반도빌리지", ref: "H58" },
     ],
   },
-  // 7~12월 셀 참조는 확인되는 대로 여기에 추가
+  7: {
+    cash: [
+      { name: "개인주식", ref: "C59" },
+      { name: "케이뱅크", ref: "C60" },
+      { name: "해외주식", ref: "C61" },
+      { name: "증권사 예수금", ref: "C62" },
+    ],
+    assets: [
+      { name: "주택원금", ref: "C63" },
+      { name: "꼬 주택청약", ref: "C64" },
+      { name: "송 주택청약", ref: "C65" },
+      { name: "연금저축", ref: "C66" },
+      { name: "꼬 퇴직금", ref: "C67" },
+    ],
+    realEstate: [
+      { name: "라포리엘", ref: "H59" },
+      { name: "반도빌리지", ref: "H60" },
+    ],
+  },
+  // 8~12월 셀 참조는 확인되는 대로 여기에 추가
 };
 
 // ============================================
@@ -514,7 +534,11 @@ const REAL_ESTATE_DETAIL_CONFIG = {
     { name: "라포리엘", investRef: "H57", sellRef: "F57", buyRef: "G57", profitDivisor: 2 },
     { name: "반도빌리지", investRef: "H58", sellRef: "F58", buyRef: "G58" },
   ],
-  // 7~12월 셀 참조는 확인되는 대로 여기에 추가
+  7: [
+    { name: "라포리엘", investRef: "H59", sellRef: "F59", buyRef: "G59", profitDivisor: 2 },
+    { name: "반도빌리지", investRef: "H60", sellRef: "F60", buyRef: "G60" },
+  ],
+  // 8~12월 셀 참조는 확인되는 대로 여기에 추가
 };
 
 function parseRealEstateDetail(grid, refConfig) {
@@ -1249,12 +1273,27 @@ function renderAssetPanel(sel) {
   const titleEl = $("#assetTitleText");
   const tagEl = $("#assetTag");
   const summaryEl = $("#assetSummary");
+  const navEl = $("#assetNav");
+  const prevBtn = $("#assetPrevBtn");
+  const nextBtn = $("#assetNextBtn");
 
-  // 종합 선택 시엔 순자산은 합산 개념이 아니므로, 데이터가 있는 가장 최근 달을 보여줌
+  // 종합 선택 시엔 순자산은 합산 개념이 아니므로, ◀▶ 로 월별 스냅샷을 넘겨볼 수 있게 함
   let targetMonth = sel;
+  const withData = CONFIG.MONTHS.filter((m) => state.monthly[m]?.assetSnapshot);
+
   if (sel === "total") {
-    const withData = CONFIG.MONTHS.filter((m) => state.monthly[m]?.assetSnapshot);
-    targetMonth = withData.length ? withData[withData.length - 1] : null;
+    if (!withData.length) {
+      targetMonth = null;
+    } else {
+      // 이전에 보던 달이 유효하면 유지, 아니면 가장 최근 달로
+      if (!state.assetPanelMonth || !withData.includes(state.assetPanelMonth)) {
+        state.assetPanelMonth = withData[withData.length - 1];
+      }
+      targetMonth = state.assetPanelMonth;
+    }
+    navEl.classList.toggle("hidden", withData.length <= 1);
+  } else {
+    navEl.classList.add("hidden");
   }
 
   const snap = targetMonth ? state.monthly[targetMonth]?.assetSnapshot : null;
@@ -1266,8 +1305,26 @@ function renderAssetPanel(sel) {
     return;
   }
 
+  if (sel === "total") {
+    const idx = withData.indexOf(targetMonth);
+    prevBtn.disabled = idx <= 0;
+    nextBtn.disabled = idx >= withData.length - 1;
+    prevBtn.onclick = () => {
+      if (idx > 0) {
+        state.assetPanelMonth = withData[idx - 1];
+        renderAssetPanel("total");
+      }
+    };
+    nextBtn.onclick = () => {
+      if (idx < withData.length - 1) {
+        state.assetPanelMonth = withData[idx + 1];
+        renderAssetPanel("total");
+      }
+    };
+  }
+
   titleEl.textContent = `${targetMonth}월 자산 현황`;
-  tagEl.textContent = sel === "total" ? `최신 데이터(${targetMonth}월) 기준` : "현금 · 자산 · 부동산 스냅샷";
+  tagEl.textContent = sel === "total" ? `${targetMonth}월 스냅샷 · ◀▶ 로 다른 달 보기` : "현금 · 자산 · 부동산 스냅샷";
 
   const reDetail = targetMonth ? state.monthly[targetMonth]?.realEstateDetail : null;
   const reProfitTotal = reDetail && reDetail.length ? reDetail.reduce((s, p) => s + p.profit, 0) : null;

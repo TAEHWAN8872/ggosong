@@ -147,6 +147,16 @@ main{max-width:1180px; margin:0 auto; padding:22px 24px;}
 .re-card.re-total .re-name{margin-bottom:0;}
 .re-total-val{font-size:16px; font-weight:800; font-variant-numeric:tabular-nums;}
 
+.asset-nav{display:flex; align-items:center; gap:4px;}
+.nav-btn{
+  background:var(--surface-2); color:var(--text); border:1px solid var(--border);
+  width:24px; height:24px; border-radius:6px; font-size:11px; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; line-height:1;
+  transition:background .12s, border-color .12s;
+}
+.nav-btn:hover{background:#e9ebef; border-color:#c9ced9;}
+.nav-btn:disabled{opacity:.35; cursor:not-allowed;}
+
 footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2); font-size:11px;}
 
 @media (max-width: 860px){
@@ -207,7 +217,16 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
     </div>
 
     <div class="panel" style="margin-bottom:14px;">
-      <h3><span id="assetTitleText">자산 현황</span> <span class="tag" id="assetTag"></span></h3>
+      <h3>
+        <span style="display:flex; align-items:center; gap:8px;">
+          <span id="assetTitleText">자산 현황</span>
+          <span class="asset-nav hidden" id="assetNav">
+            <button class="nav-btn" id="assetPrevBtn" aria-label="이전 달">◀</button>
+            <button class="nav-btn" id="assetNextBtn" aria-label="다음 달">▶</button>
+          </span>
+        </span>
+        <span class="tag" id="assetTag"></span>
+      </h3>
       <div class="kpi-grid asset-summary" id="assetSummary"></div>
       <div class="chart-wrap tall"><canvas id="assetChart"></canvas></div>
     </div>
@@ -217,6 +236,6 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
 <footer>구글 시트 원본 데이터를 실시간으로 불러옵니다 · 브라우저 로컬에만 캐시됩니다</footer>
 
 <script src="config.js"></script>
-<script src="app.js?v=20260816c"></script>
+<script src="app.js?v=20260816d"></script>
 </body>
 </html>
