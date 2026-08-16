@@ -377,6 +377,30 @@ const ASSET_SNAPSHOT_CONFIG = {
   // 2~12월 셀 참조는 확인되는 대로 여기에 추가
 };
 
+// ============================================
+// 파서 6: 부동산 상세 (최저 매도값 / 매수가격 / 수익 / 투자수익률)
+// 저축 카테고리 대신 보여줄 부동산별 상세 정보. 월별로 설정을 따로 둠.
+// ============================================
+const REAL_ESTATE_DETAIL_CONFIG = {
+  1: [
+    { name: "라포리엘", investRef: "L27", sellRef: "M27", buyRef: "N27" },
+    { name: "반도빌리지", investRef: "L28", sellRef: "M28", buyRef: "N28" },
+  ],
+  // 2~12월 셀 참조는 확인되는 대로 여기에 추가
+};
+
+function parseRealEstateDetail(grid, refConfig) {
+  if (!grid || !refConfig) return null;
+  return refConfig.map((c) => {
+    const invest = getCellValue(grid, c.investRef);
+    const sell = getCellValue(grid, c.sellRef);
+    const buy = getCellValue(grid, c.buyRef);
+    const profit = sell - buy;
+    const roi = invest ? (profit / invest) * 100 : null;
+    return { name: c.name, invest, sell, buy, profit, roi };
+  });
+}
+
 function parseAssetSnapshot(grid, refConfig) {
   if (!grid || !refConfig) return null;
   const mapItems = (items) => (items || []).map((it) => ({ name: it.name, value: getCellValue(grid, it.ref) }));
@@ -434,6 +458,7 @@ async function loadAll(forceRefresh) {
       categoryDetails: parsed.categoryDetails,
       savingsCategories: parsed.savingsCategories,
       assetSnapshot: parseAssetSnapshot(grid, ASSET_SNAPSHOT_CONFIG[m]),
+      realEstateDetail: parseRealEstateDetail(grid, REAL_ESTATE_DETAIL_CONFIG[m]),
     };
   }
 
@@ -893,6 +918,13 @@ function renderRateChart(sel) {
   destroyChart("rate");
   const titleEl = $("#rateTitleText");
   const tagEl = $("#rateTag");
+  const chartWrap = $("#rateChart").closest(".chart-wrap");
+  const listEl = $("#realEstateList");
+
+  // 기본: 차트를 보여주고 부동산 리스트는 숨김 (부동산 상세가 있는 달이면 아래에서 뒤집음)
+  chartWrap.classList.remove("hidden");
+  listEl.classList.add("hidden");
+  listEl.innerHTML = "";
 
   if (sel === "total") {
     titleEl.textContent = "저축률";
@@ -930,6 +962,36 @@ function renderRateChart(sel) {
         },
       },
     });
+    return;
+  }
+
+  // 특정 월: 저축 대신 부동산 상세 정보가 설정돼 있으면 그걸 우선 표시
+  const monthData = state.monthly[sel] || {};
+  const reDetail = monthData.realEstateDetail;
+  if (reDetail && reDetail.length) {
+    chartWrap.classList.add("hidden");
+    listEl.classList.remove("hidden");
+
+    titleEl.textContent = `${sel}월 부동산 현황`;
+    tagEl.textContent = `총 ${reDetail.length}건`;
+
+    listEl.innerHTML = reDetail
+      .map((p) => {
+        const roiText = p.roi === null || p.roi === undefined || !isFinite(p.roi) ? "-" : `${p.roi >= 0 ? "+" : ""}${p.roi.toFixed(1)}%`;
+        const roiColor = p.roi === null || p.roi === undefined || !isFinite(p.roi) ? "var(--muted)" : p.roi >= 0 ? "var(--income)" : "var(--expense)";
+        const profitColor = p.profit >= 0 ? "var(--income)" : "var(--expense)";
+        return `
+        <div class="re-card">
+          <div class="re-name">${p.name}</div>
+          <div class="re-grid">
+            <div class="re-item"><span class="re-label">최저 매도값</span><span class="re-val">${fmtWon(p.sell)}</span></div>
+            <div class="re-item"><span class="re-label">매수가격</span><span class="re-val">${fmtWon(p.buy)}</span></div>
+            <div class="re-item"><span class="re-label">수익</span><span class="re-val" style="color:${profitColor}">${fmtWon(p.profit)}</span></div>
+            <div class="re-item"><span class="re-label">투자수익률</span><span class="re-val" style="color:${roiColor}">${roiText}</span></div>
+          </div>
+        </div>`;
+      })
+      .join("");
     return;
   }
 
