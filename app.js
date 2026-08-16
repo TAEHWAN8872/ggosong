@@ -1186,13 +1186,14 @@ function renderAssetPanel(sel) {
       indexAxis: "y",
       responsive: true,
       maintainAspectRatio: false,
+      layout: { padding: { right: 56 } },
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: { label: (ctx) => fmtWon(ctx.raw) } },
         amountLabels: { enabled: true, formatter: fmtWon },
       },
       scales: {
-        x: { grid: { color: "#e2e5eb" }, suggestedMax: maxAssetVal * 1.25, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
+        x: { grid: { color: "#e2e5eb" }, suggestedMax: maxAssetVal * 1.35, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
         y: { grid: { display: false }, ticks: { color: "#6b7280" } },
       },
     },
