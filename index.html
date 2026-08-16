@@ -118,6 +118,7 @@ main{max-width:1180px; margin:0 auto; padding:22px 24px;}
 .panel h3 span.tag{font-size:10px; font-weight:600; color:var(--muted-2); background:var(--surface-2); padding:3px 8px; border-radius:20px;}
 .chart-wrap{position:relative; height:260px;}
 .chart-wrap.tall{height:320px;}
+.asset-summary{grid-template-columns:repeat(3,1fr); margin-bottom:16px;}
 
 /* ---- 카테고리 리스트 ---- */
 .cat-list{display:flex; flex-direction:column; gap:6px; margin-top:8px; overflow-y:auto;}
@@ -191,6 +192,12 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
         <h3><span id="rateTitleText">저축률</span> <span class="tag" id="rateTag">저축÷수입</span></h3>
         <div class="chart-wrap"><canvas id="rateChart"></canvas></div>
       </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:14px;">
+      <h3><span id="assetTitleText">자산 현황</span> <span class="tag" id="assetTag"></span></h3>
+      <div class="kpi-grid asset-summary" id="assetSummary"></div>
+      <div class="chart-wrap tall"><canvas id="assetChart"></canvas></div>
     </div>
   </div>
 </main>

@@ -331,6 +331,64 @@ function parseOldFormatMonth(grid, ranges) {
 }
 
 // ============================================
+// 파서 5: 자산 현황 스냅샷 (현금 · 자산 · 부동산)
+// 사용자가 지정한 셀 참조(예: "K18", "K17+N19+O19+P19")를 그대로 읽어옴.
+// 월마다 셀 위치가 다를 수 있어 월별로 설정을 따로 둠. 아직 정의 안 된 달은 null 처리.
+// ============================================
+function colToIdx(letter) {
+  let idx = 0;
+  for (let i = 0; i < letter.length; i++) idx = idx * 26 + (letter.charCodeAt(i) - 64);
+  return idx - 1; // 0-indexed
+}
+
+function getCellValue(grid, ref) {
+  return ref
+    .split("+")
+    .map((s) => s.trim())
+    .reduce((sum, part) => {
+      const m = part.match(/^([A-Z]+)(\d+)$/);
+      if (!m) return sum;
+      const col = colToIdx(m[1]);
+      const row = parseInt(m[2], 10) - 1;
+      return sum + toNum(cell(grid, row, col));
+    }, 0);
+}
+
+const ASSET_SNAPSHOT_CONFIG = {
+  1: {
+    cash: [
+      { name: "개인주식", ref: "O21" },
+      { name: "케이뱅크", ref: "K18" },
+      { name: "해외주식", ref: "K19" },
+      { name: "증권사 예수금", ref: "K17+N19+O19+P19" },
+    ],
+    assets: [
+      { name: "주택원금", ref: "K20" },
+      { name: "꼬 주택청약", ref: "K21" },
+      { name: "송 주택청약", ref: "K22" },
+      { name: "연금저축", ref: "K23" },
+      { name: "꼬 퇴직금", ref: "K24" },
+    ],
+    realEstate: [
+      { name: "라포리엘", ref: "L27" },
+      { name: "반도빌리지", ref: "L28" },
+    ],
+  },
+  // 2~12월 셀 참조는 확인되는 대로 여기에 추가
+};
+
+function parseAssetSnapshot(grid, refConfig) {
+  if (!grid || !refConfig) return null;
+  const mapItems = (items) => (items || []).map((it) => ({ name: it.name, value: getCellValue(grid, it.ref) }));
+  const cash = mapItems(refConfig.cash);
+  const assets = mapItems(refConfig.assets);
+  const realEstate = mapItems(refConfig.realEstate);
+  const financial = [...cash, ...assets].reduce((s, i) => s + i.value, 0);
+  const realEstateTotal = realEstate.reduce((s, i) => s + i.value, 0);
+  return { cash, assets, realEstate, financial, realEstateTotal, netWorth: financial + realEstateTotal };
+}
+
+// ============================================
 // 데이터 로드 + 집계
 // ============================================
 async function loadAll(forceRefresh) {
@@ -375,6 +433,7 @@ async function loadAll(forceRefresh) {
       categories: parsed.categories,
       categoryDetails: parsed.categoryDetails,
       savingsCategories: parsed.savingsCategories,
+      assetSnapshot: parseAssetSnapshot(grid, ASSET_SNAPSHOT_CONFIG[m]),
     };
   }
 
@@ -438,6 +497,7 @@ function renderAll() {
   renderCatChart(state.selectedMonth);
   renderSideChart(state.selectedMonth);
   renderRateChart(state.selectedMonth);
+  renderAssetPanel(state.selectedMonth);
 }
 
 function renderMonthRibbon() {
@@ -452,6 +512,7 @@ function renderMonthRibbon() {
     renderTrendChart(sel);
     renderSideChart(sel);
     renderRateChart(sel);
+    renderAssetPanel(sel);
   };
 
   // 종합 타일 (1~8월 전체 합계) — 맨 앞에 고정
@@ -886,6 +947,74 @@ function renderRateChart(sel) {
     data: {
       labels: entries.map(([name]) => name),
       datasets: [{ data: entries.map(([, v]) => v), backgroundColor: "#c08a2e", borderRadius: 4 }],
+    },
+    options: {
+      indexAxis: "y",
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (ctx) => fmtWon(ctx.raw) } },
+      },
+      scales: {
+        x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
+        y: { grid: { display: false }, ticks: { color: "#6b7280" } },
+      },
+    },
+  });
+}
+
+function renderAssetPanel(sel) {
+  destroyChart("asset");
+  const titleEl = $("#assetTitleText");
+  const tagEl = $("#assetTag");
+  const summaryEl = $("#assetSummary");
+
+  // 종합 선택 시엔 순자산은 합산 개념이 아니므로, 데이터가 있는 가장 최근 달을 보여줌
+  let targetMonth = sel;
+  if (sel === "total") {
+    const withData = CONFIG.MONTHS.filter((m) => state.monthly[m]?.assetSnapshot);
+    targetMonth = withData.length ? withData[withData.length - 1] : null;
+  }
+
+  const snap = targetMonth ? state.monthly[targetMonth]?.assetSnapshot : null;
+
+  if (!snap) {
+    titleEl.textContent = "자산 현황";
+    tagEl.textContent = "데이터 준비 중";
+    summaryEl.innerHTML = `<div class="kpi-card"><div class="label">자산 데이터</div><div class="value" style="font-size:13px; color:var(--muted); font-weight:600;">아직 입력된 달이 없어요</div></div>`;
+    return;
+  }
+
+  titleEl.textContent = `${targetMonth}월 자산 현황`;
+  tagEl.textContent = sel === "total" ? `최신 데이터(${targetMonth}월) 기준` : "현금 · 자산 · 부동산 스냅샷";
+
+  const cards = [
+    { label: "금융자산", value: snap.financial, color: "var(--accent)" },
+    { label: "부동산", value: snap.realEstateTotal, color: "var(--savings)" },
+    { label: "총 자산(순자산)", value: snap.netWorth, color: "var(--income)" },
+  ];
+  summaryEl.innerHTML = cards
+    .map(
+      (c) => `
+    <div class="kpi-card">
+      <div class="label"><span class="dot" style="background:${c.color}"></span>${c.label}</div>
+      <div class="value">${fmtWon(c.value)}</div>
+    </div>`
+    )
+    .join("");
+
+  const items = [
+    ...snap.cash.map((i) => ({ ...i, color: "#4a6cc0" })),
+    ...snap.assets.map((i) => ({ ...i, color: "#2f9d6f" })),
+    ...snap.realEstate.map((i) => ({ ...i, color: "#c08a2e" })),
+  ].filter((i) => i.value);
+
+  state.charts.asset = new Chart($("#assetChart"), {
+    type: "bar",
+    data: {
+      labels: items.map((i) => i.name),
+      datasets: [{ data: items.map((i) => i.value), backgroundColor: items.map((i) => i.color), borderRadius: 4 }],
     },
     options: {
       indexAxis: "y",
