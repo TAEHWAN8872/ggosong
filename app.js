@@ -437,10 +437,6 @@ function renderAll() {
 function renderMonthRibbon() {
   const wrap = $("#monthRibbon");
   wrap.innerHTML = "";
-  const maxVal = Math.max(
-    1,
-    ...CONFIG.MONTHS.flatMap((m) => [state.monthly[m]?.income || 0, state.monthly[m]?.expense || 0])
-  );
 
   const selectMonth = (sel) => {
     state.selectedMonth = sel;
@@ -456,10 +452,6 @@ function renderMonthRibbon() {
   const totalNet = total.income - total.expense - total.savings;
   totalTile.innerHTML = `
     <div class="m-label">종합</div>
-    <div class="m-bar">
-      <div style="height:${Math.max(2, (total.income / maxVal) * 34)}px;background:var(--income)"></div>
-      <div style="height:${Math.max(2, (total.expense / maxVal) * 34)}px;background:var(--expense)"></div>
-    </div>
     <div class="m-net" style="color:${totalNet >= 0 ? "var(--income)" : "var(--expense)"}">${fmtShort(totalNet)}</div>
   `;
   totalTile.addEventListener("click", () => selectMonth("total"));
@@ -471,14 +463,8 @@ function renderMonthRibbon() {
     const net = (d.income || 0) - (d.expense || 0) - (d.savings || 0);
     const tile = document.createElement("div");
     tile.className = "month-tile" + (m === state.selectedMonth ? " active" : "") + (hasData ? "" : " empty");
-    const incH = Math.max(2, ((d.income || 0) / maxVal) * 34);
-    const expH = Math.max(2, ((d.expense || 0) / maxVal) * 34);
     tile.innerHTML = `
       <div class="m-label">${m}월</div>
-      <div class="m-bar">
-        <div style="height:${incH}px;background:var(--income)"></div>
-        <div style="height:${expH}px;background:var(--expense)"></div>
-      </div>
       <div class="m-net" style="color:${net >= 0 ? "var(--income)" : "var(--expense)"}">${hasData ? fmtShort(net) : "–"}</div>
     `;
     tile.addEventListener("click", () => selectMonth(m));
