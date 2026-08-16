@@ -220,21 +220,17 @@ function parseNewFormatMonth(grid, ranges) {
       }
     }
 
-    // 저축: 고정지출표와 같은 구조(A열=분류, B열=항목, D열=금액)가 이어진다고 가정
+    // 저축: 별도 분류열 없이 B열(항목명)에 바로 D열(실제 금액)이 붙는 구조
     if (ranges.savingsRows) {
       const [r1, r2] = ranges.savingsRows;
-      let lastCat = null;
       let sum = 0;
       for (let sheetRow = r1; sheetRow <= r2; sheetRow++) {
         const rr = grid[sheetRow - 1] || [];
-        const rawCat = trimStr(rr[leftCatCol]);
-        if (rawCat) lastCat = rawCat;
-        const cat = rawCat || lastCat;
         const item = trimStr(rr[leftItemCol]);
         const amt = toNum(rr[leftActualCol]);
         sum += amt;
-        if (cat && item && amt) {
-          out.savingsCategories[cat] = (out.savingsCategories[cat] || 0) + amt;
+        if (item && amt) {
+          out.savingsCategories[item] = (out.savingsCategories[item] || 0) + amt;
         }
       }
       if (!out.savings) out.savings = sum;
@@ -274,13 +270,13 @@ function parseOldFormatMonth(grid, ranges) {
     }
   });
 
-  // 저축: J~N열(9~13) 두 행 합, 바로 위 행을 항목명 헤더로 가정
+  // 저축: J~N열(9~13), 각 행마다 바로 위 행이 그 행만의 항목명 헤더 (두 그룹이 서로 다른 헤더를 가짐)
   if (ranges.savingsRows) {
     const SAV_COLS = [9, 10, 11, 12, 13]; // J,K,L,M,N
-    const headerRow = grid[ranges.savingsRows[0] - 2] || [];
     let sum = 0;
     ranges.savingsRows.forEach((sheetRow) => {
       const row = grid[sheetRow - 1] || [];
+      const headerRow = grid[sheetRow - 2] || []; // 바로 위 행 = 이 행만의 헤더
       SAV_COLS.forEach((c) => {
         const amt = toNum(row[c]);
         sum += amt;
