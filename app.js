@@ -4,7 +4,7 @@
 const state = {
   monthly: {},      // { 1: {income, expense, savings, categories:{}}, ... }
   side: null,        // { months:[...], categories:{...} }
-  selectedMonth: 8,
+  selectedMonth: "total", // "total" = 종합(1~8월 합계), 또는 1~8 숫자(해당 월)
   charts: {},
 };
 
@@ -257,8 +257,8 @@ function parseOldFormatMonth(grid, ranges) {
 
   const CAT = 1, ITEM = 2, AMT = 4; // 분류, 제목, 금액(실제) — B, C, E열
 
-  // 수입: 구형 포맷(1~5월) 공통으로 F5 셀에 월급 금액이 들어있음
-  out.income = toNum(cell(grid, 4, 5)); // 시트상 F5 (0-indexed: row 4, col 5)
+  // 수입: 구형 포맷(1~5월) 공통으로 K4 셀에 월급 금액이 들어있음
+  out.income = toNum(cell(grid, 3, 10)); // 시트상 K4 (0-indexed: row 3, col 10)
 
   // 혹시 F5가 비어있는 달이 있을 경우를 대비해 "월급" 라벨 행도 폴백으로 훑음
   if (!out.income) {
@@ -367,6 +367,29 @@ async function loadAll(forceRefresh) {
 // ============================================
 // 렌더링
 // ============================================
+// ============================================
+// 종합(전체 합계) 집계
+// ============================================
+function aggregateTotal() {
+  const agg = { income: 0, expense: 0, savings: 0, categories: {} };
+  CONFIG.MONTHS.forEach((m) => {
+    const d = state.monthly[m];
+    if (!d) return;
+    agg.income += d.income || 0;
+    agg.expense += d.expense || 0;
+    agg.savings += d.savings || 0;
+    Object.entries(d.categories || {}).forEach(([k, v]) => {
+      agg.categories[k] = (agg.categories[k] || 0) + v;
+    });
+  });
+  return agg;
+}
+
+// selectedMonth가 "total"이면 전체 합계, 숫자면 해당 월 데이터를 반환
+function getSelectedData(sel) {
+  return sel === "total" ? aggregateTotal() : state.monthly[sel] || {};
+}
+
 function renderAll() {
   renderMonthRibbon();
   renderKpis(state.selectedMonth);
@@ -383,6 +406,30 @@ function renderMonthRibbon() {
     1,
     ...CONFIG.MONTHS.flatMap((m) => [state.monthly[m]?.income || 0, state.monthly[m]?.expense || 0])
   );
+
+  const selectMonth = (sel) => {
+    state.selectedMonth = sel;
+    renderMonthRibbon();
+    renderKpis(sel);
+    renderCatChart(sel);
+  };
+
+  // 종합 타일 (1~8월 전체 합계) — 맨 앞에 고정
+  const total = aggregateTotal();
+  const totalTile = document.createElement("div");
+  totalTile.className = "month-tile" + (state.selectedMonth === "total" ? " active" : "");
+  const totalNet = total.income - total.expense - total.savings;
+  totalTile.innerHTML = `
+    <div class="m-label">종합</div>
+    <div class="m-bar">
+      <div style="height:${Math.max(2, (total.income / maxVal) * 34)}px;background:var(--income)"></div>
+      <div style="height:${Math.max(2, (total.expense / maxVal) * 34)}px;background:var(--expense)"></div>
+    </div>
+    <div class="m-net" style="color:${totalNet >= 0 ? "var(--income)" : "var(--expense)"}">${fmtShort(totalNet)}</div>
+  `;
+  totalTile.addEventListener("click", () => selectMonth("total"));
+  wrap.appendChild(totalTile);
+
   CONFIG.MONTHS.forEach((m) => {
     const d = state.monthly[m] || {};
     const hasData = (d.income || 0) > 0 || (d.expense || 0) > 0;
@@ -399,18 +446,14 @@ function renderMonthRibbon() {
       </div>
       <div class="m-net" style="color:${net >= 0 ? "var(--income)" : "var(--expense)"}">${hasData ? fmtShort(net) : "–"}</div>
     `;
-    tile.addEventListener("click", () => {
-      state.selectedMonth = m;
-      renderMonthRibbon();
-      renderKpis(m);
-      renderCatChart(m);
-    });
+    tile.addEventListener("click", () => selectMonth(m));
     wrap.appendChild(tile);
   });
 }
 
-function renderKpis(m) {
-  const d = state.monthly[m] || {};
+function renderKpis(sel) {
+  const d = getSelectedData(sel);
+  const label = sel === "total" ? "종합" : `${sel}월`;
   const income = d.income || 0;
   const expense = d.expense || 0;
   const savings = d.savings || 0;
@@ -428,7 +471,7 @@ function renderKpis(m) {
     .map(
       (c) => `
     <div class="kpi-card">
-      <div class="label"><span class="dot" style="background:${c.color}"></span>${m}월 ${c.label}</div>
+      <div class="label"><span class="dot" style="background:${c.color}"></span>${label} ${c.label}</div>
       <div class="value">${fmtWon(c.value)}</div>
       <div class="delta">${c.sub || ""}</div>
     </div>`
@@ -491,15 +534,16 @@ function renderTrendChart() {
   });
 }
 
-function renderCatChart(m) {
+function renderCatChart(sel) {
   destroyChart("cat");
-  const cats = state.monthly[m]?.categories || {};
+  const label = sel === "total" ? "종합" : `${sel}월`;
+  const cats = getSelectedData(sel).categories || {};
   const entries = Object.entries(cats)
     .filter(([, v]) => v > 0)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 8);
 
-  $("#catTitle").innerHTML = `${m}월 지출 카테고리 <span class="tag">상위 ${entries.length}개</span>`;
+  $("#catTitle").innerHTML = `${label} 지출 카테고리 <span class="tag">상위 ${entries.length}개</span>`;
 
   const total = entries.reduce((s, [, v]) => s + v, 0) || 1;
   $("#catList").innerHTML = entries
