@@ -1614,7 +1614,7 @@ function renderStockPanel() {
         <div class="cat-row" style="cursor:default;">
           <div class="name">${name}</div>
           <div class="bar-track"><div class="bar-fill" style="width:${(v.value / maxBrokerVal) * 100}%; background:var(--stock);"></div></div>
-          <div class="amt">${fmtWon(v.value)}</div>
+          <div class="amt">${fmtMasked(v.value)}</div>
         </div>
         <div style="padding:0 2px 8px 98px; font-size:11px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
           <span class="stock-badge ${cls}">${fmtPct(v.rate)}</span>
@@ -1731,7 +1731,7 @@ function renderStockHoldingsTable() {
         <td class="center"><span class="tag-mini">${h.broker}</span></td>
         <td class="center"><span class="tag-mini">${h.region}</span></td>
         <td class="center"><span class="tag-mini">${h.account}</span></td>
-        <td class="num">${fmtWon(h.value)}</td>
+        <td class="num">${fmtMasked(h.value)}</td>
         <td class="num" style="color:${h.pnl >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${fmtWon(h.pnl)}</td>
         <td class="num"><span class="stock-badge ${cls}">${fmtPct(h.rate)}</span></td>
       </tr>`;
