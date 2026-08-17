@@ -20,7 +20,8 @@ const STOCK_SHEET_NAME = "증권";
 const $ = (sel) => document.querySelector(sel);
 const fmtWon = (n) => (n < 0 ? "-" : "") + "₩" + Math.abs(Math.round(n)).toLocaleString("ko-KR");
 const fmtWonSigned = (n) => (n > 0 ? "+" : n < 0 ? "-" : "") + "₩" + Math.abs(Math.round(n)).toLocaleString("ko-KR");
-const fmtBuy = (n) => (state.hideBuy ? `<span class="masked-value">₩ ••••••</span>` : fmtWon(n));
+const fmtMasked = (n) => (state.hideBuy ? `<span class="masked-value">₩ ••••••</span>` : fmtWon(n));
+const fmtMaskedSigned = (n) => (state.hideBuy ? `<span class="masked-value">••••••</span>` : fmtWonSigned(n));
 const fmtShort = (n) => {
   const abs = Math.abs(n);
   if (abs >= 100000000) return (n / 100000000).toFixed(1) + "억";
@@ -1573,15 +1574,15 @@ function renderStockPanel() {
   const pnlColor = s.totalPnl >= 0 ? "var(--stock-up)" : "var(--stock-down)";
   kpiGrid.innerHTML = `
     <div class="kpi-card">
-      <div class="label"><span class="dot" style="background:var(--stock)"></span>총 평가금액</div>
-      <div class="value">${fmtWon(s.totalValue)}</div>
+      <div class="label">
+        <span class="dot" style="background:var(--stock)"></span>총 평가금액
+        <button class="mask-toggle" id="buyToggleBtn" title="${state.hideBuy ? "금액 표시" : "금액 가리기"}">${state.hideBuy ? "🙈" : "👁"}</button>
+      </div>
+      <div class="value">${fmtMasked(s.totalValue)}</div>
     </div>
     <div class="kpi-card">
-      <div class="label">
-        <span class="dot" style="background:var(--muted-2)"></span>총 매입금액
-        <button class="mask-toggle" id="buyToggleBtn" title="${state.hideBuy ? "원금 표시" : "원금 가리기"}">${state.hideBuy ? "🙈" : "👁"}</button>
-      </div>
-      <div class="value">${fmtBuy(s.totalBuy)}</div>
+      <div class="label"><span class="dot" style="background:var(--muted-2)"></span>총 매입금액</div>
+      <div class="value">${fmtMasked(s.totalBuy)}</div>
     </div>
     <div class="kpi-card">
       <div class="label"><span class="dot" style="background:${pnlColor}"></span>총 손익</div>
@@ -1618,7 +1619,7 @@ function renderStockPanel() {
         <div style="padding:0 2px 8px 98px; font-size:11px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
           <span class="stock-badge ${cls}">${fmtPct(v.rate)}</span>
           <span class="pnl-amt" style="color:${v.pnl >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${fmtWonSigned(v.pnl)}</span>
-          <span style="color:var(--muted-2);">매입 ${fmtBuy(v.buy)}</span>
+          <span style="color:var(--muted-2);">매입 ${fmtMasked(v.buy)}</span>
         </div>
       </div>`;
     })
@@ -1669,8 +1670,8 @@ function renderStockPanel() {
     return `<div class="cat-item-row" style="padding:2px 0; align-items:center;">
         <span>${name}</span>
         <span class="cat-item-amt" style="display:flex; align-items:center; gap:6px;">
-          ${fmtWon(v.value)}
-          <span class="pnl-amt" style="color:${v.pnl >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${fmtWonSigned(v.pnl)}</span>
+          ${fmtMasked(v.value)}
+          <span class="pnl-amt" style="color:${v.pnl >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${fmtMaskedSigned(v.pnl)}</span>
           <span class="stock-badge ${cls}">${fmtPct(v.rate)}</span>
         </span>
       </div>`;
