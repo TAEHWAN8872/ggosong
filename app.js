@@ -10,6 +10,7 @@ const state = {
   expandedCats: new Set(), // 지출 카테고리 목록에서 펼쳐진 항목들
   charts: {},
   assetPanelMonth: null, // 종합 탭에서 ◀▶ 로 넘겨보는 자산 현황 대상 월
+  stockSort: { key: "value", dir: "desc" }, // 보유 종목 테이블 정렬 기준
 };
 
 // 증권 탭이 읽어올 구글 시트 탭 이름 (시트 쪽 탭 이름을 바꾸면 여기도 맞춰주세요)
@@ -17,6 +18,7 @@ const STOCK_SHEET_NAME = "증권";
 
 const $ = (sel) => document.querySelector(sel);
 const fmtWon = (n) => (n < 0 ? "-" : "") + "₩" + Math.abs(Math.round(n)).toLocaleString("ko-KR");
+const fmtWonSigned = (n) => (n > 0 ? "+" : n < 0 ? "-" : "") + "₩" + Math.abs(Math.round(n)).toLocaleString("ko-KR");
 const fmtShort = (n) => {
   const abs = Math.abs(n);
   if (abs >= 100000000) return (n / 100000000).toFixed(1) + "억";
@@ -45,6 +47,19 @@ function initApp() {
   $("#app").classList.remove("hidden");
   $("#refreshBtn").classList.remove("hidden");
   $("#refreshBtn").addEventListener("click", () => loadAll(true));
+
+  // 보유 종목 테이블 정렬 헤더 (평가금액/손익/등락률)
+  document.querySelectorAll("table.stock-table th.sortable").forEach((th) => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.sort;
+      if (state.stockSort.key === key) {
+        state.stockSort.dir = state.stockSort.dir === "desc" ? "asc" : "desc";
+      } else {
+        state.stockSort = { key, dir: "desc" };
+      }
+      renderStockHoldingsTable();
+    });
+  });
 
   if (typeof Chart === "undefined") {
     setSyncStatus("차트 라이브러리 로드 실패 (Chart.js CDN 확인 필요)");
@@ -1534,6 +1549,7 @@ function renderStockPanel() {
   const kpiGrid = $("#stockKpiGrid");
   const brokerTag = $("#stockBrokerTag");
   const brokerList = $("#stockBrokerList");
+  const regionList = $("#stockRegionList");
   const accountList = $("#stockAccountList");
   const holdingsTag = $("#stockHoldingsTag");
   const tbody = $("#stockTableBody");
@@ -1542,6 +1558,7 @@ function renderStockPanel() {
     kpiGrid.innerHTML = "";
     brokerTag.textContent = "";
     brokerList.innerHTML = `<div class="stock-empty">아직 증권 시트에서 데이터를 찾지 못했어요.<br>시트 탭 이름이 "${STOCK_SHEET_NAME}"이 맞는지, 헤더에 "증권사"·"티커" 열이 있는지 확인해주세요.</div>`;
+    regionList.innerHTML = "";
     accountList.innerHTML = "";
     holdingsTag.textContent = "";
     tbody.innerHTML = "";
@@ -1582,8 +1599,9 @@ function renderStockPanel() {
           <div class="bar-track"><div class="bar-fill" style="width:${(v.value / maxBrokerVal) * 100}%; background:var(--stock);"></div></div>
           <div class="amt">${fmtWon(v.value)}</div>
         </div>
-        <div style="padding:0 2px 8px 98px; font-size:11px; display:flex; gap:8px; align-items:center;">
+        <div style="padding:0 2px 8px 98px; font-size:11px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
           <span class="stock-badge ${cls}">${fmtPct(v.rate)}</span>
+          <span class="pnl-amt" style="color:${v.pnl >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${fmtWonSigned(v.pnl)}</span>
           <span style="color:var(--muted-2);">매입 ${fmtWon(v.buy)}</span>
         </div>
       </div>`;
@@ -1630,19 +1648,41 @@ function renderStockPanel() {
     },
   });
 
-  accountList.innerHTML = accountEntries
-    .map(([name, v]) => {
-      const cls = rateClass(v.rate);
-      return `<div class="cat-item-row" style="padding:2px 0;">
+  const pnlAmtRow = (name, v) => {
+    const cls = rateClass(v.rate);
+    return `<div class="cat-item-row" style="padding:2px 0; align-items:center;">
         <span>${name}</span>
-        <span class="cat-item-amt">${fmtWon(v.value)} <span class="stock-badge ${cls}" style="margin-left:6px;">${fmtPct(v.rate)}</span></span>
+        <span class="cat-item-amt" style="display:flex; align-items:center; gap:6px;">
+          ${fmtWon(v.value)}
+          <span class="pnl-amt" style="color:${v.pnl >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${fmtWonSigned(v.pnl)}</span>
+          <span class="stock-badge ${cls}">${fmtPct(v.rate)}</span>
+        </span>
       </div>`;
-    })
-    .join("");
+  };
+
+  regionList.innerHTML = regionEntries.map(([name, v]) => pnlAmtRow(name, v)).join("");
+  accountList.innerHTML = accountEntries.map(([name, v]) => pnlAmtRow(name, v)).join("");
 
   // ---- 보유 종목 테이블 ----
-  const sortedHoldings = [...s.holdings].sort((a, b) => b.value - a.value);
-  holdingsTag.textContent = `총 ${sortedHoldings.length}개 종목`;
+  holdingsTag.textContent = `총 ${s.holdings.length}개 종목`;
+  renderStockHoldingsTable();
+}
+
+function renderStockHoldingsTable() {
+  const s = state.stocks;
+  const tbody = $("#stockTableBody");
+  if (!s || !s.holdings.length) return;
+
+  const { key, dir } = state.stockSort;
+  const mul = dir === "asc" ? 1 : -1;
+  const sortedHoldings = [...s.holdings].sort((a, b) => (a[key] - b[key]) * mul);
+
+  document.querySelectorAll("table.stock-table th.sortable").forEach((th) => {
+    const isActive = th.dataset.sort === key;
+    th.classList.toggle("active", isActive);
+    th.querySelector(".sort-arrow").textContent = isActive ? (dir === "asc" ? "▴" : "▾") : "▾";
+  });
+
   tbody.innerHTML = sortedHoldings
     .map((h) => {
       const cls = rateClass(h.rate);
@@ -1652,9 +1692,9 @@ function renderStockPanel() {
           <div class="stock-name">${h.name}</div>
           <div class="stock-ticker">${h.ticker}</div>
         </td>
-        <td><span class="tag-mini">${h.broker}</span></td>
-        <td><span class="tag-mini">${h.region}</span></td>
-        <td><span class="tag-mini">${h.account}</span></td>
+        <td class="center"><span class="tag-mini">${h.broker}</span></td>
+        <td class="center"><span class="tag-mini">${h.region}</span></td>
+        <td class="center"><span class="tag-mini">${h.account}</span></td>
         <td class="num">${fmtWon(h.value)}</td>
         <td class="num" style="color:${h.pnl >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${fmtWon(h.pnl)}</td>
         <td class="num"><span class="stock-badge ${cls}">${fmtPct(h.rate)}</span></td>

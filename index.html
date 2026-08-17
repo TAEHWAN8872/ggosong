@@ -177,12 +177,20 @@ table.stock-table thead th{
 table.stock-table td{padding:8px 8px; border-bottom:1px solid var(--border); vertical-align:middle;}
 table.stock-table tbody tr:last-child td{border-bottom:none;}
 table.stock-table td.num{text-align:right; font-variant-numeric:tabular-nums; font-weight:600;}
+table.stock-table td.center{text-align:center;}
 table.stock-table .stock-name{font-weight:700; color:var(--text);}
 table.stock-table .stock-ticker{font-size:10.5px; color:var(--muted-2); margin-top:1px;}
 table.stock-table .tag-mini{
   display:inline-block; font-size:10px; font-weight:600; color:var(--muted);
   background:var(--surface-2); padding:2px 7px; border-radius:20px;
 }
+table.stock-table th.center{text-align:center;}
+table.stock-table th.num{text-align:right;}
+table.stock-table th.sortable{cursor:pointer; user-select:none; white-space:nowrap;}
+table.stock-table th.sortable:hover{color:var(--text);}
+table.stock-table th.sortable .sort-arrow{display:inline-block; width:9px; font-size:9px; color:var(--muted-2); margin-left:2px;}
+table.stock-table th.sortable.active .sort-arrow{color:var(--accent);}
+.pnl-amt{font-size:10.5px; margin-left:6px;}
 
 .stock-empty{color:var(--muted-2); font-size:12.5px; padding:24px 4px; text-align:center;}
 
@@ -276,7 +284,8 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
             <div class="chart-wrap" style="height:160px; flex:1;"><canvas id="stockRegionChart"></canvas></div>
             <div class="chart-wrap" style="height:160px; flex:1;"><canvas id="stockAccountChart"></canvas></div>
           </div>
-          <div class="cat-list" id="stockAccountList" style="margin-top:10px;"></div>
+          <div class="cat-list" id="stockRegionList" style="margin-top:10px;"></div>
+          <div class="cat-list" id="stockAccountList" style="margin-top:6px;"></div>
         </div>
       </div>
 
@@ -287,12 +296,12 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
             <thead>
               <tr>
                 <th>종목</th>
-                <th>증권사</th>
-                <th>구분</th>
-                <th>계좌</th>
-                <th style="text-align:right;">평가금액</th>
-                <th style="text-align:right;">손익</th>
-                <th style="text-align:right;">등락률</th>
+                <th class="center">증권사</th>
+                <th class="center">구분</th>
+                <th class="center">계좌</th>
+                <th class="num sortable" data-sort="value">평가금액<span class="sort-arrow">▾</span></th>
+                <th class="num sortable" data-sort="pnl">손익<span class="sort-arrow">▾</span></th>
+                <th class="num sortable" data-sort="rate">등락률<span class="sort-arrow">▾</span></th>
               </tr>
             </thead>
             <tbody id="stockTableBody"></tbody>
