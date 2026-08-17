@@ -11,7 +11,7 @@ const state = {
   charts: {},
   assetPanelMonth: null, // 종합 탭에서 ◀▶ 로 넘겨보는 자산 현황 대상 월
   stockSort: { key: "value", dir: "desc" }, // 보유 종목 테이블 정렬 기준
-  hideBuy: localStorage.getItem("hideBuyAmount") === "1", // 원금(매입금액) 가리기 여부
+  hideAmounts: localStorage.getItem("hideAmounts") === "1", // 금액(원금/평가금액 등) 가리기 여부 — 가계부/증권 탭 공통
 };
 
 // 증권 탭이 읽어올 구글 시트 탭 이름 (시트 쪽 탭 이름을 바꾸면 여기도 맞춰주세요)
@@ -20,14 +20,16 @@ const STOCK_SHEET_NAME = "증권";
 const $ = (sel) => document.querySelector(sel);
 const fmtWon = (n) => (n < 0 ? "-" : "") + "₩" + Math.abs(Math.round(n)).toLocaleString("ko-KR");
 const fmtWonSigned = (n) => (n > 0 ? "+" : n < 0 ? "-" : "") + "₩" + Math.abs(Math.round(n)).toLocaleString("ko-KR");
-const fmtMasked = (n) => (state.hideBuy ? `<span class="masked-value">₩ ••••••</span>` : fmtWon(n));
-const fmtMaskedSigned = (n) => (state.hideBuy ? `<span class="masked-value">••••••</span>` : fmtWonSigned(n));
 const fmtShort = (n) => {
   const abs = Math.abs(n);
   if (abs >= 100000000) return (n / 100000000).toFixed(1) + "억";
   if (abs >= 10000) return Math.round(n / 10000) + "만";
   return n.toLocaleString("ko-KR");
 };
+// 금액 가리기 모드일 때 실제 숫자 대신 보여줄 플레인 텍스트 포맷터 — DOM과 캔버스(Chart.js) 양쪽에서 그대로 쓸 수 있음
+const maskWon = (n) => (state.hideAmounts ? "₩ ••••••" : fmtWon(n));
+const maskWonSigned = (n) => (state.hideAmounts ? "••••••" : fmtWonSigned(n));
+const maskShort = (n) => (state.hideAmounts ? "•••" : fmtShort(n));
 
 // 막대가 0에서 자라나는 기본 애니메이션을 끔 — 매번 최종 상태로 즉시 그려지도록 하여
 // 렌더링 직후(탭 전환/캡처 등) 막대가 짧거나 안 보이는 문제를 방지
@@ -50,6 +52,16 @@ function initApp() {
   $("#app").classList.remove("hidden");
   $("#refreshBtn").classList.remove("hidden");
   $("#refreshBtn").addEventListener("click", () => loadAll(true));
+
+  const maskToggleBtn = $("#maskToggleBtn");
+  maskToggleBtn.classList.remove("hidden");
+  updateMaskToggleLabel();
+  maskToggleBtn.addEventListener("click", () => {
+    state.hideAmounts = !state.hideAmounts;
+    localStorage.setItem("hideAmounts", state.hideAmounts ? "1" : "0");
+    updateMaskToggleLabel();
+    renderAll();
+  });
 
   // 보유 종목 테이블 정렬 헤더 (평가금액/손익/등락률)
   document.querySelectorAll("table.stock-table th.sortable").forEach((th) => {
@@ -76,6 +88,13 @@ function initApp() {
 
 function setSyncStatus(text) {
   $("#syncStatus").textContent = text;
+}
+
+// 헤더의 금액 가리기 버튼 라벨/아이콘을 현재 상태에 맞춰 갱신
+function updateMaskToggleLabel() {
+  const btn = $("#maskToggleBtn");
+  if (!btn) return;
+  btn.textContent = state.hideAmounts ? "🙈 금액 표시" : "👁 금액 가리기";
 }
 
 // ============================================
@@ -867,9 +886,9 @@ function renderKpis(sel) {
   const rate = income ? ((savings / income) * 100).toFixed(1) : "0.0";
 
   const cards = [
-    { label: "총 수입", value: income, color: "var(--income)", sub: `월급 ${fmtWon(d.income || 0)} + 부업 ${fmtWon(sideIncome)}` },
+    { label: "총 수입", value: income, color: "var(--income)", sub: `월급 ${maskWon(d.income || 0)} + 부업 ${maskWon(sideIncome)}` },
     { label: "총 지출", value: expense, color: "var(--expense)" },
-    { label: "저축/투자", value: savings, color: "var(--savings)", sub: `저축률 ${rate}%` },
+    { label: "저축/투자", value: savings, color: "var(--savings)", sub: `저축률 ${state.hideAmounts ? "••" : rate}%` },
     { label: "부업 수익", value: sideIncome, color: "var(--accent)" },
   ];
 
@@ -878,7 +897,7 @@ function renderKpis(sel) {
       (c) => `
     <div class="kpi-card">
       <div class="label"><span class="dot" style="background:${c.color}"></span>${label} ${c.label}</div>
-      <div class="value">${fmtWon(c.value)}</div>
+      <div class="value">${maskWon(c.value)}</div>
       <div class="delta">${c.sub || ""}</div>
     </div>`
     )
@@ -913,7 +932,7 @@ const pctLabelPlugin = {
         if (!bar) return;
         const v = opt.values[i];
         if (v === null || v === undefined || !isFinite(v)) return;
-        const text = (v > 0 ? "+" : "") + v.toFixed(1) + "%";
+        const text = state.hideAmounts ? "••%" : (v > 0 ? "+" : "") + v.toFixed(1) + "%";
         ctx.fillStyle = v >= 0 ? "#2f9d6f" : "#d63653";
         ctx.fillText(text, bar.x, bar.y - 22);
       });
@@ -937,7 +956,7 @@ const amountLabelPlugin = {
       // opt.formatter는 함수가 아니라 문자열 플래그("won")로 받음 — Chart.js는 옵션 트리에
       // 함수가 들어있으면 "스크립터블 옵션"으로 간주해 자기 내부 컨텍스트를 인자로 넣어
       // 먼저 호출해버리는데, 그러면 우리가 원하는 시점/인자로 호출할 수 없어 값이 깨짐
-      const formatter = opt.formatter === "won" ? fmtWon : fmtShort;
+      const formatter = opt.formatter === "won" ? maskWon : maskShort;
       const datasetIndexes = opt.datasets || chart.data.datasets.map((_, i) => i);
       ctx.save();
       ctx.font = "700 10.5px -apple-system, BlinkMacSystemFont, sans-serif";
@@ -1006,7 +1025,7 @@ const stackTotalLabelPlugin = {
           }
         });
         if (x === null || !total) return;
-        ctx.fillText(fmtShort(total), x, topY - 8);
+        ctx.fillText(maskShort(total), x, topY - 8);
       });
       ctx.restore();
     } catch (e) {
@@ -1054,7 +1073,7 @@ function renderTrendChart(sel) {
         layout: { padding: { top: 20 } },
         plugins: {
           legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
-          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtWon(ctx.raw)}` } },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${maskWon(ctx.raw)}` } },
           amountLabels: { enabled: true, datasets: [0, 1], values: { 0: income, 1: expense } },
         },
         scales: {
@@ -1062,7 +1081,7 @@ function renderTrendChart(sel) {
           y: {
             grid: { color: "#e2e5eb" },
             suggestedMax: Math.max(...income, ...expense, 1) * 1.15,
-            ticks: { color: "#6b7280", callback: (v) => fmtShort(v) },
+            ticks: { color: "#6b7280", callback: (v) => maskShort(v) },
           },
         },
       },
@@ -1119,7 +1138,7 @@ function renderTrendChart(sel) {
       layout: { padding: { top: 36 } },
       plugins: {
         legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
-        tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtWon(ctx.raw)}` } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${maskWon(ctx.raw)}` } },
         pctLabels: { values: pctValues, datasetIndex: curDatasetIndex },
         amountLabels: { enabled: true, values: amountValuesByDs },
       },
@@ -1128,7 +1147,7 @@ function renderTrendChart(sel) {
         y: {
           grid: { color: "#e2e5eb" },
           suggestedMax: maxVal * 1.18,
-          ticks: { color: "#6b7280", callback: (v) => fmtShort(v) },
+          ticks: { color: "#6b7280", callback: (v) => maskShort(v) },
         },
       },
     },
@@ -1155,7 +1174,7 @@ function renderCatChart(sel) {
         ? items
             .map(
               ([item, amt]) => `
-        <div class="cat-item-row"><span>${item}</span><span class="cat-item-amt">${fmtWon(amt)}</span></div>`
+        <div class="cat-item-row"><span>${item}</span><span class="cat-item-amt">${maskWon(amt)}</span></div>`
             )
             .join("")
         : `<div class="cat-item-empty">세부 내역 없음</div>`;
@@ -1164,7 +1183,7 @@ function renderCatChart(sel) {
         <div class="cat-row" data-cat="${name}">
           <div class="name">${name}</div>
           <div class="bar-track"><div class="bar-fill" style="width:${(val / total) * 100}%"></div></div>
-          <div class="amt">${fmtWon(val)}</div>
+          <div class="amt">${maskWon(val)}</div>
           <div class="expand-icon">${isOpen ? "▲" : "▼"}</div>
         </div>
         <div class="cat-detail ${isOpen ? "" : "hidden"}">${itemsHtml}</div>
@@ -1234,7 +1253,7 @@ function renderSideChart(sel) {
         layout: { padding: { top: 22 } },
         plugins: {
           legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
-          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtWon(ctx.raw)}` } },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${maskWon(ctx.raw)}` } },
           stackTotalLabels: { enabled: true },
         },
         scales: {
@@ -1243,7 +1262,7 @@ function renderSideChart(sel) {
             stacked: true,
             suggestedMax: maxTotal * 1.18,
             grid: { color: "#e2e5eb" },
-            ticks: { color: "#6b7280", callback: (v) => fmtShort(v) },
+            ticks: { color: "#6b7280", callback: (v) => maskShort(v) },
           },
         },
       },
@@ -1260,7 +1279,7 @@ function renderSideChart(sel) {
     { key: "카테크", color: "#c77dff" },
   ];
   const values = cats.map((c) => (side[c.key] ? side[c.key][sel] || 0 : 0));
-  tagEl.textContent = `총 ${fmtShort(values.reduce((a, b) => a + b, 0))}`;
+  tagEl.textContent = `총 ${maskShort(values.reduce((a, b) => a + b, 0))}`;
 
   state.charts.side = new Chart($("#sideChart"), {
     type: "bar",
@@ -1274,7 +1293,7 @@ function renderSideChart(sel) {
       layout: { padding: { top: 20 } },
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: (ctx) => fmtWon(ctx.raw) } },
+        tooltip: { callbacks: { label: (ctx) => maskWon(ctx.raw) } },
         amountLabels: { enabled: true, values },
       },
       scales: {
@@ -1282,7 +1301,7 @@ function renderSideChart(sel) {
         y: {
           grid: { color: "#e2e5eb" },
           suggestedMax: Math.max(...values, 1) * 1.15,
-          ticks: { color: "#6b7280", callback: (v) => fmtShort(v) },
+          ticks: { color: "#6b7280", callback: (v) => maskShort(v) },
         },
       },
     },
@@ -1330,10 +1349,10 @@ function renderRateChart(sel) {
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `저축률: ${ctx.raw}%` } } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `저축률: ${state.hideAmounts ? "••" : ctx.raw}%` } } },
         scales: {
           x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
-          y: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => v + "%" } },
+          y: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => (state.hideAmounts ? "••%" : v + "%") } },
         },
       },
     });
@@ -1355,23 +1374,23 @@ function renderRateChart(sel) {
     const totalCardHtml = `
       <div class="re-card re-total">
         <div class="re-name">최종 부동산 수익 합계</div>
-        <div class="re-total-val" style="color:${totalColor}">${fmtWon(totalProfit)}</div>
+        <div class="re-total-val" style="color:${totalColor}">${maskWon(totalProfit)}</div>
       </div>`;
 
     listEl.innerHTML =
       totalCardHtml +
       reDetail
         .map((p) => {
-        const roiText = p.roi === null || p.roi === undefined || !isFinite(p.roi) ? "-" : `${p.roi >= 0 ? "+" : ""}${p.roi.toFixed(1)}%`;
+        const roiText = state.hideAmounts ? "••%" : p.roi === null || p.roi === undefined || !isFinite(p.roi) ? "-" : `${p.roi >= 0 ? "+" : ""}${p.roi.toFixed(1)}%`;
         const roiColor = p.roi === null || p.roi === undefined || !isFinite(p.roi) ? "var(--muted)" : p.roi >= 0 ? "var(--income)" : "var(--expense)";
         const profitColor = p.profit >= 0 ? "var(--income)" : "var(--expense)";
         return `
         <div class="re-card">
           <div class="re-name">${p.name}</div>
           <div class="re-grid">
-            <div class="re-item"><span class="re-label">최저 매도값</span><span class="re-val">${fmtWon(p.sell)}</span></div>
-            <div class="re-item"><span class="re-label">매수가격</span><span class="re-val">${fmtWon(p.buy)}</span></div>
-            <div class="re-item"><span class="re-label">수익</span><span class="re-val" style="color:${profitColor}">${fmtWon(p.profit)}</span></div>
+            <div class="re-item"><span class="re-label">최저 매도값</span><span class="re-val">${maskWon(p.sell)}</span></div>
+            <div class="re-item"><span class="re-label">매수가격</span><span class="re-val">${maskWon(p.buy)}</span></div>
+            <div class="re-item"><span class="re-label">수익</span><span class="re-val" style="color:${profitColor}">${maskWon(p.profit)}</span></div>
             <div class="re-item"><span class="re-label">투자수익률</span><span class="re-val" style="color:${roiColor}">${roiText}</span></div>
           </div>
         </div>`;
@@ -1403,11 +1422,11 @@ function renderRateChart(sel) {
       maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: (ctx) => fmtWon(ctx.raw) } },
+        tooltip: { callbacks: { label: (ctx) => maskWon(ctx.raw) } },
         amountLabels: { enabled: true, formatter: "won", values: savingsValues },
       },
       scales: {
-        x: { grid: { color: "#e2e5eb" }, suggestedMax: maxSavingsVal * 1.25, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
+        x: { grid: { color: "#e2e5eb" }, suggestedMax: maxSavingsVal * 1.25, ticks: { color: "#6b7280", callback: (v) => maskShort(v) } },
         y: { grid: { display: false }, ticks: { color: "#6b7280" } },
       },
     },
@@ -1485,7 +1504,7 @@ function renderAssetPanel(sel) {
       label: "예상 자산(부동산 수익)",
       value: snap.netWorth + reProfitTotal,
       color: "var(--forecast)",
-      sub: `총자산 + 부동산 수익 ${fmtWon(reProfitTotal)}`,
+      sub: `총자산 + 부동산 수익 ${maskWon(reProfitTotal)}`,
     });
   }
   summaryEl.innerHTML = cards
@@ -1493,7 +1512,7 @@ function renderAssetPanel(sel) {
       (c) => `
     <div class="kpi-card">
       <div class="label"><span class="dot" style="background:${c.color}"></span>${c.label}</div>
-      <div class="value">${fmtWon(c.value)}</div>
+      <div class="value">${maskWon(c.value)}</div>
       ${c.sub ? `<div class="delta">${c.sub}</div>` : ""}
     </div>`
     )
@@ -1520,11 +1539,11 @@ function renderAssetPanel(sel) {
       layout: { padding: { right: 56 } },
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: (ctx) => fmtWon(ctx.raw) } },
+        tooltip: { callbacks: { label: (ctx) => maskWon(ctx.raw) } },
         amountLabels: { enabled: true, formatter: "won", values: assetValues },
       },
       scales: {
-        x: { grid: { color: "#e2e5eb" }, suggestedMax: maxAssetVal * 1.35, ticks: { color: "#6b7280", callback: (v) => fmtShort(v) } },
+        x: { grid: { color: "#e2e5eb" }, suggestedMax: maxAssetVal * 1.35, ticks: { color: "#6b7280", callback: (v) => maskShort(v) } },
         y: { grid: { display: false }, ticks: { color: "#6b7280" } },
       },
     },
@@ -1576,13 +1595,13 @@ function renderStockPanel() {
     <div class="kpi-card">
       <div class="label">
         <span class="dot" style="background:var(--stock)"></span>총 평가금액
-        <button class="mask-toggle" id="buyToggleBtn" title="${state.hideBuy ? "금액 표시" : "금액 가리기"}">${state.hideBuy ? "🙈" : "👁"}</button>
+        <button class="mask-toggle" id="buyToggleBtn" title="${state.hideAmounts ? "금액 표시" : "금액 가리기"}">${state.hideAmounts ? "🙈" : "👁"}</button>
       </div>
-      <div class="value">${fmtMasked(s.totalValue)}</div>
+      <div class="value">${maskWon(s.totalValue)}</div>
     </div>
     <div class="kpi-card">
       <div class="label"><span class="dot" style="background:var(--muted-2)"></span>총 매입금액</div>
-      <div class="value">${fmtMasked(s.totalBuy)}</div>
+      <div class="value">${maskWon(s.totalBuy)}</div>
     </div>
     <div class="kpi-card">
       <div class="label"><span class="dot" style="background:${pnlColor}"></span>총 손익</div>
@@ -1596,9 +1615,10 @@ function renderStockPanel() {
   const buyToggleBtn = $("#buyToggleBtn");
   if (buyToggleBtn) {
     buyToggleBtn.addEventListener("click", () => {
-      state.hideBuy = !state.hideBuy;
-      localStorage.setItem("hideBuyAmount", state.hideBuy ? "1" : "0");
-      renderStockPanel();
+      state.hideAmounts = !state.hideAmounts;
+      localStorage.setItem("hideAmounts", state.hideAmounts ? "1" : "0");
+      updateMaskToggleLabel();
+      renderAll();
     });
   }
 
@@ -1614,12 +1634,12 @@ function renderStockPanel() {
         <div class="cat-row" style="cursor:default;">
           <div class="name">${name}</div>
           <div class="bar-track"><div class="bar-fill" style="width:${(v.value / maxBrokerVal) * 100}%; background:var(--stock);"></div></div>
-          <div class="amt">${fmtMasked(v.value)}</div>
+          <div class="amt">${maskWon(v.value)}</div>
         </div>
         <div style="padding:0 2px 8px 98px; font-size:11px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
           <span class="stock-badge ${cls}">${fmtPct(v.rate)}</span>
           <span class="pnl-amt" style="color:${v.pnl >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${fmtWonSigned(v.pnl)}</span>
-          <span style="color:var(--muted-2);">매입 ${fmtMasked(v.buy)}</span>
+          <span style="color:var(--muted-2);">매입 ${maskWon(v.buy)}</span>
         </div>
       </div>`;
     })
@@ -1643,7 +1663,7 @@ function renderStockPanel() {
       cutout: "62%",
       plugins: {
         legend: { position: "bottom", labels: { color: "#6b7280", font: { size: 10.5 }, boxWidth: 10, padding: 8 } },
-        tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${fmtWon(ctx.raw)}` } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${maskWon(ctx.raw)}` } },
       },
     },
   });
@@ -1660,7 +1680,7 @@ function renderStockPanel() {
       cutout: "62%",
       plugins: {
         legend: { position: "bottom", labels: { color: "#6b7280", font: { size: 10.5 }, boxWidth: 10, padding: 8 } },
-        tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${fmtWon(ctx.raw)}` } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${maskWon(ctx.raw)}` } },
       },
     },
   });
@@ -1670,8 +1690,8 @@ function renderStockPanel() {
     return `<div class="cat-item-row" style="padding:2px 0; align-items:center;">
         <span>${name}</span>
         <span class="cat-item-amt" style="display:flex; align-items:center; gap:6px;">
-          ${fmtMasked(v.value)}
-          <span class="pnl-amt" style="color:${v.pnl >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${fmtMaskedSigned(v.pnl)}</span>
+          ${maskWon(v.value)}
+          <span class="pnl-amt" style="color:${v.pnl >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${maskWonSigned(v.pnl)}</span>
           <span class="stock-badge ${cls}">${fmtPct(v.rate)}</span>
         </span>
       </div>`;
@@ -1731,7 +1751,7 @@ function renderStockHoldingsTable() {
         <td class="center"><span class="tag-mini">${h.broker}</span></td>
         <td class="center"><span class="tag-mini">${h.region}</span></td>
         <td class="center"><span class="tag-mini">${h.account}</span></td>
-        <td class="num">${fmtMasked(h.value)}</td>
+        <td class="num">${maskWon(h.value)}</td>
         <td class="num" style="color:${h.pnl >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${fmtWon(h.pnl)}</td>
         <td class="num"><span class="stock-badge ${cls}">${fmtPct(h.rate)}</span></td>
       </tr>`;
