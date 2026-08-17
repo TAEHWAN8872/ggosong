@@ -11,6 +11,7 @@ const state = {
   charts: {},
   assetPanelMonth: null, // 종합 탭에서 ◀▶ 로 넘겨보는 자산 현황 대상 월
   stockSort: { key: "value", dir: "desc" }, // 보유 종목 테이블 정렬 기준
+  hideBuy: localStorage.getItem("hideBuyAmount") === "1", // 원금(매입금액) 가리기 여부
 };
 
 // 증권 탭이 읽어올 구글 시트 탭 이름 (시트 쪽 탭 이름을 바꾸면 여기도 맞춰주세요)
@@ -19,6 +20,7 @@ const STOCK_SHEET_NAME = "증권";
 const $ = (sel) => document.querySelector(sel);
 const fmtWon = (n) => (n < 0 ? "-" : "") + "₩" + Math.abs(Math.round(n)).toLocaleString("ko-KR");
 const fmtWonSigned = (n) => (n > 0 ? "+" : n < 0 ? "-" : "") + "₩" + Math.abs(Math.round(n)).toLocaleString("ko-KR");
+const fmtBuy = (n) => (state.hideBuy ? `<span class="masked-value">₩ ••••••</span>` : fmtWon(n));
 const fmtShort = (n) => {
   const abs = Math.abs(n);
   if (abs >= 100000000) return (n / 100000000).toFixed(1) + "억";
@@ -1575,8 +1577,11 @@ function renderStockPanel() {
       <div class="value">${fmtWon(s.totalValue)}</div>
     </div>
     <div class="kpi-card">
-      <div class="label"><span class="dot" style="background:var(--muted-2)"></span>총 매입금액</div>
-      <div class="value">${fmtWon(s.totalBuy)}</div>
+      <div class="label">
+        <span class="dot" style="background:var(--muted-2)"></span>총 매입금액
+        <button class="mask-toggle" id="buyToggleBtn" title="${state.hideBuy ? "원금 표시" : "원금 가리기"}">${state.hideBuy ? "🙈" : "👁"}</button>
+      </div>
+      <div class="value">${fmtBuy(s.totalBuy)}</div>
     </div>
     <div class="kpi-card">
       <div class="label"><span class="dot" style="background:${pnlColor}"></span>총 손익</div>
@@ -1586,6 +1591,15 @@ function renderStockPanel() {
       <div class="label"><span class="dot" style="background:${pnlColor}"></span>총 손익률</div>
       <div class="value" style="color:${pnlColor}">${fmtPct(s.totalRate)}</div>
     </div>`;
+
+  const buyToggleBtn = $("#buyToggleBtn");
+  if (buyToggleBtn) {
+    buyToggleBtn.addEventListener("click", () => {
+      state.hideBuy = !state.hideBuy;
+      localStorage.setItem("hideBuyAmount", state.hideBuy ? "1" : "0");
+      renderStockPanel();
+    });
+  }
 
   // ---- 증권사별 breakdown (막대 리스트, 지출 카테고리 리스트와 같은 스타일) ----
   const brokerEntries = Object.entries(s.byBroker).sort((a, b) => b[1].value - a[1].value);
@@ -1604,7 +1618,7 @@ function renderStockPanel() {
         <div style="padding:0 2px 8px 98px; font-size:11px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
           <span class="stock-badge ${cls}">${fmtPct(v.rate)}</span>
           <span class="pnl-amt" style="color:${v.pnl >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${fmtWonSigned(v.pnl)}</span>
-          <span style="color:var(--muted-2);">매입 ${fmtWon(v.buy)}</span>
+          <span style="color:var(--muted-2);">매입 ${fmtBuy(v.buy)}</span>
         </div>
       </div>`;
     })
