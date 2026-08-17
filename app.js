@@ -4,11 +4,16 @@
 const state = {
   monthly: {},      // { 1: {income, expense, savings, categories:{}}, ... }
   side: null,        // { months:[...], categories:{...} }
+  stocks: null,      // { holdings:[...], totalValue, totalBuy, totalPnl, totalRate, byBroker:{}, byRegion:{}, byAccount:{} }
   selectedMonth: "total", // "total" = 종합(1~8월 합계), 또는 1~8 숫자(해당 월)
+  view: "budget",    // "budget" = 가계부 탭들, "stocks" = 증권 탭
   expandedCats: new Set(), // 지출 카테고리 목록에서 펼쳐진 항목들
   charts: {},
   assetPanelMonth: null, // 종합 탭에서 ◀▶ 로 넘겨보는 자산 현황 대상 월
 };
+
+// 증권 탭이 읽어올 구글 시트 탭 이름 (시트 쪽 탭 이름을 바꾸면 여기도 맞춰주세요)
+const STOCK_SHEET_NAME = "증권";
 
 const $ = (sel) => document.querySelector(sel);
 const fmtWon = (n) => (n < 0 ? "-" : "") + "₩" + Math.abs(Math.round(n)).toLocaleString("ko-KR");
@@ -164,6 +169,97 @@ function parseSideBusiness(grid) {
     }
   }
   return categories;
+}
+
+// ============================================
+// 파서 2-1: 증권 시트
+// ============================================
+// 헤더 텍스트를 기준으로 열 위치를 동적으로 찾기 때문에, 시트에서 열 순서를
+// 바꾸거나 열을 추가/삭제해도 이 함수는 계속 동작합니다. (행 번호도 고정하지 않음)
+function parseStocks(grid) {
+  if (!grid || !grid.length) return null;
+
+  const headerHit = findCell(grid, "증권사");
+  if (!headerHit) return null;
+
+  const headerRow = grid[headerHit.r] || [];
+  const col = {
+    broker: findColInRow(headerRow, "증권사"),
+    name: findColInRow(headerRow, "종목명"),
+    ticker: findColInRow(headerRow, "티커"),
+    qty: findColInRow(headerRow, "보유수량"),
+    buy: findColInRow(headerRow, "매입금액"),
+    price: findColInRow(headerRow, "현재가"),
+    value: findColInRow(headerRow, "평가금액"),
+    pnl: findColInRow(headerRow, "손익"),
+    rate: findColInRow(headerRow, "등락률"),
+    region: findColInRow(headerRow, "구분"),
+    account: findColInRow(headerRow, "계좌구분"),
+  };
+
+  const holdings = [];
+  for (let r = headerHit.r + 1; r < grid.length; r++) {
+    const ticker = trimStr(cell(grid, r, col.ticker));
+    const name = trimStr(cell(grid, r, col.name));
+    const buy = toNum(cell(grid, r, col.buy));
+    const value = toNum(cell(grid, r, col.value));
+    // 티커/종목명이 비어있거나, 매입/평가금액이 둘 다 0인 빈 행(작업용으로 미리 만들어둔 행)은 건너뜀
+    if (!ticker && !name) continue;
+    if (!buy && !value) continue;
+
+    const rawRate = cell(grid, r, col.rate);
+    const rate = isNum(rawRate) ? rawRate : buy ? (value - buy) / buy : 0;
+    const pnl = isNum(cell(grid, r, col.pnl)) ? cell(grid, r, col.pnl) : value - buy;
+    const region = trimStr(cell(grid, r, col.region)) || (/^KRX:/.test(ticker) ? "국내" : "해외");
+    const account = trimStr(cell(grid, r, col.account)) || "미분류";
+
+    holdings.push({
+      broker: trimStr(cell(grid, r, col.broker)) || "미분류",
+      name: name || ticker,
+      ticker,
+      qty: toNum(cell(grid, r, col.qty)),
+      buy,
+      price: toNum(cell(grid, r, col.price)),
+      value,
+      pnl,
+      rate,
+      region,
+      account,
+    });
+  }
+
+  if (!holdings.length) return { holdings: [], totalValue: 0, totalBuy: 0, totalPnl: 0, totalRate: 0, byBroker: {}, byRegion: {}, byAccount: {} };
+
+  const groupSum = (keyFn) => {
+    const out = {};
+    holdings.forEach((h) => {
+      const k = keyFn(h) || "미분류";
+      if (!out[k]) out[k] = { value: 0, buy: 0 };
+      out[k].value += h.value;
+      out[k].buy += h.buy;
+    });
+    Object.values(out).forEach((g) => {
+      g.pnl = g.value - g.buy;
+      g.rate = g.buy ? g.pnl / g.buy : 0;
+    });
+    return out;
+  };
+
+  const totalValue = holdings.reduce((s, h) => s + h.value, 0);
+  const totalBuy = holdings.reduce((s, h) => s + h.buy, 0);
+  const totalPnl = totalValue - totalBuy;
+  const totalRate = totalBuy ? totalPnl / totalBuy : 0;
+
+  return {
+    holdings,
+    totalValue,
+    totalBuy,
+    totalPnl,
+    totalRate,
+    byBroker: groupSum((h) => h.broker),
+    byRegion: groupSum((h) => h.region),
+    byAccount: groupSum((h) => h.account),
+  };
 }
 
 // ============================================
@@ -578,6 +674,7 @@ async function loadAll(forceRefresh) {
       const parsed = JSON.parse(cached);
       state.monthly = parsed.monthly;
       state.side = parsed.side;
+      state.stocks = parsed.stocks || null;
       renderAll();
       setSyncStatus("캐시됨 · " + new Date(parsed.ts).toLocaleTimeString("ko-KR"));
       return;
@@ -587,12 +684,14 @@ async function loadAll(forceRefresh) {
   const sheetNames = [
     CONFIG.SHEET_NAMES.ANNUAL,
     CONFIG.SHEET_NAMES.SIDE_BUSINESS,
+    STOCK_SHEET_NAME,
     ...CONFIG.MONTHS.map((m) => CONFIG.monthMeta(m).sheetName),
   ];
   const grids = await fetchGrids(sheetNames);
 
   const annual = parseAnnualSummary(grids[CONFIG.SHEET_NAMES.ANNUAL]);
   const side = parseSideBusiness(grids[CONFIG.SHEET_NAMES.SIDE_BUSINESS]);
+  const stocks = parseStocks(grids[STOCK_SHEET_NAME]);
 
   const monthly = {};
   for (const m of CONFIG.MONTHS) {
@@ -617,7 +716,8 @@ async function loadAll(forceRefresh) {
 
   state.monthly = monthly;
   state.side = side;
-  sessionStorage.setItem(cacheKey, JSON.stringify({ monthly, side, ts: Date.now() }));
+  state.stocks = stocks;
+  sessionStorage.setItem(cacheKey, JSON.stringify({ monthly, side, stocks, ts: Date.now() }));
 
   renderAll();
   setSyncStatus("방금 동기화됨 · " + new Date().toLocaleTimeString("ko-KR"));
@@ -668,8 +768,19 @@ function getSelectedData(sel) {
   return sel === "total" ? aggregateTotal() : state.monthly[sel] || {};
 }
 
+// state.view("budget"/"stocks")에 맞춰 #budgetView / #stockView 표시 전환
+function toggleView() {
+  $("#budgetView").classList.toggle("hidden", state.view !== "budget");
+  $("#stockView").classList.toggle("hidden", state.view !== "stocks");
+}
+
 function renderAll() {
   renderMonthRibbon();
+  toggleView();
+  if (state.view === "stocks") {
+    renderStockPanel();
+    return;
+  }
   renderKpis(state.selectedMonth);
   renderTrendChart(state.selectedMonth);
   renderCatChart(state.selectedMonth);
@@ -683,7 +794,9 @@ function renderMonthRibbon() {
   wrap.innerHTML = "";
 
   const selectMonth = (sel) => {
+    state.view = "budget";
     state.selectedMonth = sel;
+    toggleView();
     renderMonthRibbon();
     renderKpis(sel);
     renderCatChart(sel);
@@ -693,18 +806,33 @@ function renderMonthRibbon() {
     renderAssetPanel(sel);
   };
 
+  const selectStocks = () => {
+    state.view = "stocks";
+    toggleView();
+    renderMonthRibbon();
+    renderStockPanel();
+  };
+
   // 종합 타일 (1~8월 전체 합계) — 맨 앞에 고정
   const totalTile = document.createElement("div");
-  totalTile.className = "month-tile" + (state.selectedMonth === "total" ? " active" : "");
+  totalTile.className = "month-tile" + (state.view === "budget" && state.selectedMonth === "total" ? " active" : "");
   totalTile.innerHTML = `<div class="m-label">종합</div>`;
   totalTile.addEventListener("click", () => selectMonth("total"));
   wrap.appendChild(totalTile);
+
+  // 증권 타일 — 종합 바로 옆에 고정
+  const stockTile = document.createElement("div");
+  stockTile.className = "month-tile stock-tile" + (state.view === "stocks" ? " active" : "");
+  stockTile.innerHTML = `<div class="m-label">증권</div>`;
+  stockTile.addEventListener("click", selectStocks);
+  wrap.appendChild(stockTile);
 
   CONFIG.MONTHS.forEach((m) => {
     const d = state.monthly[m] || {};
     const hasData = (d.income || 0) > 0 || (d.expense || 0) > 0;
     const tile = document.createElement("div");
-    tile.className = "month-tile" + (m === state.selectedMonth ? " active" : "") + (hasData ? "" : " empty");
+    tile.className =
+      "month-tile" + (state.view === "budget" && m === state.selectedMonth ? " active" : "") + (hasData ? "" : " empty");
     tile.innerHTML = `<div class="m-label">${m}월</div>`;
     tile.addEventListener("click", () => selectMonth(m));
     wrap.appendChild(tile);
@@ -1383,6 +1511,156 @@ function renderAssetPanel(sel) {
       },
     },
   });
+}
+
+// ============================================
+// 증권 탭 렌더링
+// ============================================
+function fmtPct(n) {
+  const sign = n > 0 ? "+" : "";
+  return sign + (n * 100).toFixed(2) + "%";
+}
+
+function rateClass(n) {
+  if (n > 0.0001) return "up";
+  if (n < -0.0001) return "down";
+  return "flat";
+}
+
+function renderStockPanel() {
+  ["stockRegion", "stockAccount"].forEach((k) => destroyChart(k));
+
+  const s = state.stocks;
+  const kpiGrid = $("#stockKpiGrid");
+  const brokerTag = $("#stockBrokerTag");
+  const brokerList = $("#stockBrokerList");
+  const accountList = $("#stockAccountList");
+  const holdingsTag = $("#stockHoldingsTag");
+  const tbody = $("#stockTableBody");
+
+  if (!s || !s.holdings.length) {
+    kpiGrid.innerHTML = "";
+    brokerTag.textContent = "";
+    brokerList.innerHTML = `<div class="stock-empty">아직 증권 시트에서 데이터를 찾지 못했어요.<br>시트 탭 이름이 "${STOCK_SHEET_NAME}"이 맞는지, 헤더에 "증권사"·"티커" 열이 있는지 확인해주세요.</div>`;
+    accountList.innerHTML = "";
+    holdingsTag.textContent = "";
+    tbody.innerHTML = "";
+    return;
+  }
+
+  // ---- KPI 카드 ----
+  const pnlColor = s.totalPnl >= 0 ? "var(--stock-up)" : "var(--stock-down)";
+  kpiGrid.innerHTML = `
+    <div class="kpi-card">
+      <div class="label"><span class="dot" style="background:var(--stock)"></span>총 평가금액</div>
+      <div class="value">${fmtWon(s.totalValue)}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label"><span class="dot" style="background:var(--muted-2)"></span>총 매입금액</div>
+      <div class="value">${fmtWon(s.totalBuy)}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label"><span class="dot" style="background:${pnlColor}"></span>총 손익</div>
+      <div class="value" style="color:${pnlColor}">${fmtWon(s.totalPnl)}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label"><span class="dot" style="background:${pnlColor}"></span>총 손익률</div>
+      <div class="value" style="color:${pnlColor}">${fmtPct(s.totalRate)}</div>
+    </div>`;
+
+  // ---- 증권사별 breakdown (막대 리스트, 지출 카테고리 리스트와 같은 스타일) ----
+  const brokerEntries = Object.entries(s.byBroker).sort((a, b) => b[1].value - a[1].value);
+  brokerTag.textContent = `${brokerEntries.length}개 증권사`;
+  const maxBrokerVal = Math.max(...brokerEntries.map(([, v]) => v.value), 1);
+  brokerList.innerHTML = brokerEntries
+    .map(([name, v]) => {
+      const cls = rateClass(v.rate);
+      return `
+      <div class="cat-row-wrap">
+        <div class="cat-row" style="cursor:default;">
+          <div class="name">${name}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${(v.value / maxBrokerVal) * 100}%; background:var(--stock);"></div></div>
+          <div class="amt">${fmtWon(v.value)}</div>
+        </div>
+        <div style="padding:0 2px 8px 98px; font-size:11px; display:flex; gap:8px; align-items:center;">
+          <span class="stock-badge ${cls}">${fmtPct(v.rate)}</span>
+          <span style="color:var(--muted-2);">매입 ${fmtWon(v.buy)}</span>
+        </div>
+      </div>`;
+    })
+    .join("");
+
+  // ---- 국내/해외 + 계좌구분 도넛 차트 ----
+  const regionEntries = Object.entries(s.byRegion).sort((a, b) => b[1].value - a[1].value);
+  const accountEntries = Object.entries(s.byAccount).sort((a, b) => b[1].value - a[1].value);
+  const regionColors = ["#3a6fb0", "#c08a2e", "#8a5cf6", "#2f9d6f", "#d63653"];
+  const accountColors = ["#4a6cc0", "#2f9d6f", "#c08a2e", "#8a5cf6", "#d63653"];
+
+  state.charts.stockRegion = new Chart($("#stockRegionChart"), {
+    type: "doughnut",
+    data: {
+      labels: regionEntries.map(([k]) => k),
+      datasets: [{ data: regionEntries.map(([, v]) => v.value), backgroundColor: regionColors, borderWidth: 0 }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: "62%",
+      plugins: {
+        legend: { position: "bottom", labels: { color: "#6b7280", font: { size: 10.5 }, boxWidth: 10, padding: 8 } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${fmtWon(ctx.raw)}` } },
+      },
+    },
+  });
+
+  state.charts.stockAccount = new Chart($("#stockAccountChart"), {
+    type: "doughnut",
+    data: {
+      labels: accountEntries.map(([k]) => k),
+      datasets: [{ data: accountEntries.map(([, v]) => v.value), backgroundColor: accountColors, borderWidth: 0 }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: "62%",
+      plugins: {
+        legend: { position: "bottom", labels: { color: "#6b7280", font: { size: 10.5 }, boxWidth: 10, padding: 8 } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${fmtWon(ctx.raw)}` } },
+      },
+    },
+  });
+
+  accountList.innerHTML = accountEntries
+    .map(([name, v]) => {
+      const cls = rateClass(v.rate);
+      return `<div class="cat-item-row" style="padding:2px 0;">
+        <span>${name}</span>
+        <span class="cat-item-amt">${fmtWon(v.value)} <span class="stock-badge ${cls}" style="margin-left:6px;">${fmtPct(v.rate)}</span></span>
+      </div>`;
+    })
+    .join("");
+
+  // ---- 보유 종목 테이블 ----
+  const sortedHoldings = [...s.holdings].sort((a, b) => b.value - a.value);
+  holdingsTag.textContent = `총 ${sortedHoldings.length}개 종목`;
+  tbody.innerHTML = sortedHoldings
+    .map((h) => {
+      const cls = rateClass(h.rate);
+      return `
+      <tr>
+        <td>
+          <div class="stock-name">${h.name}</div>
+          <div class="stock-ticker">${h.ticker}</div>
+        </td>
+        <td><span class="tag-mini">${h.broker}</span></td>
+        <td><span class="tag-mini">${h.region}</span></td>
+        <td><span class="tag-mini">${h.account}</span></td>
+        <td class="num">${fmtWon(h.value)}</td>
+        <td class="num" style="color:${h.pnl >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${fmtWon(h.pnl)}</td>
+        <td class="num"><span class="stock-badge ${cls}">${fmtPct(h.rate)}</span></td>
+      </tr>`;
+    })
+    .join("");
 }
 
 // ============================================
