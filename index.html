@@ -279,13 +279,19 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
           <div class="cat-list" id="stockBrokerList"></div>
         </div>
         <div class="panel">
-          <h3>국내 · 해외 / 계좌구분 비중</h3>
-          <div style="display:flex; gap:10px;">
-            <div class="chart-wrap" style="height:160px; flex:1;"><canvas id="stockRegionChart"></canvas></div>
-            <div class="chart-wrap" style="height:160px; flex:1;"><canvas id="stockAccountChart"></canvas></div>
-          </div>
+          <h3>국내 · 해외 비중</h3>
+          <div class="chart-wrap" style="height:180px;"><canvas id="stockRegionChart"></canvas></div>
           <div class="cat-list" id="stockRegionList" style="margin-top:10px;"></div>
-          <div class="cat-list" id="stockAccountList" style="margin-top:6px;"></div>
+        </div>
+      </div>
+
+      <div class="panel-grid">
+        <div class="panel" style="grid-column:1 / -1;">
+          <h3>계좌구분 비중</h3>
+          <div style="display:flex; gap:18px; align-items:flex-start;">
+            <div class="chart-wrap" style="height:200px; width:220px; flex:0 0 220px;"><canvas id="stockAccountChart"></canvas></div>
+            <div class="cat-list" id="stockAccountList" style="flex:1; margin-top:4px;"></div>
+          </div>
         </div>
       </div>
 
