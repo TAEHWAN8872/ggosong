@@ -1551,6 +1551,7 @@ function renderStockPanel() {
   const brokerList = $("#stockBrokerList");
   const regionList = $("#stockRegionList");
   const accountList = $("#stockAccountList");
+  const topPnlList = $("#stockTopPnlList");
   const holdingsTag = $("#stockHoldingsTag");
   const tbody = $("#stockTableBody");
 
@@ -1560,6 +1561,7 @@ function renderStockPanel() {
     brokerList.innerHTML = `<div class="stock-empty">아직 증권 시트에서 데이터를 찾지 못했어요.<br>시트 탭 이름이 "${STOCK_SHEET_NAME}"이 맞는지, 헤더에 "증권사"·"티커" 열이 있는지 확인해주세요.</div>`;
     regionList.innerHTML = "";
     accountList.innerHTML = "";
+    topPnlList.innerHTML = "";
     holdingsTag.textContent = "";
     tbody.innerHTML = "";
     return;
@@ -1662,6 +1664,25 @@ function renderStockPanel() {
 
   regionList.innerHTML = regionEntries.map(([name, v]) => pnlAmtRow(name, v)).join("");
   accountList.innerHTML = accountEntries.map(([name, v]) => pnlAmtRow(name, v)).join("");
+
+  // ---- 손익 상위 TOP10 ----
+  const top10 = [...s.holdings].sort((a, b) => b.pnl - a.pnl).slice(0, 10);
+  topPnlList.innerHTML = top10
+    .map((h, i) => {
+      const cls = rateClass(h.rate);
+      return `
+      <div class="cat-item-row" style="padding:5px 0; align-items:center;">
+        <span style="display:flex; align-items:center; gap:8px; min-width:0;">
+          <span style="flex:0 0 16px; text-align:center; font-size:10.5px; font-weight:700; color:var(--muted-2);">${i + 1}</span>
+          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${h.name}</span>
+        </span>
+        <span class="cat-item-amt" style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+          <span class="pnl-amt" style="color:${h.pnl >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${fmtWonSigned(h.pnl)}</span>
+          <span class="stock-badge ${cls}">${fmtPct(h.rate)}</span>
+        </span>
+      </div>`;
+    })
+    .join("");
 
   // ---- 보유 종목 테이블 ----
   holdingsTag.textContent = `총 ${s.holdings.length}개 종목`;
