@@ -198,7 +198,21 @@ table.stock-table th.sortable .sort-arrow{display:inline-block; width:9px; font-
 table.stock-table th.sortable.active .sort-arrow{color:var(--accent);}
 .pnl-amt{font-size:10.5px; margin-left:6px;}
 
-.stock-empty{color:var(--muted-2); font-size:12.5px; padding:24px 4px; text-align:center;}
+.stock-empty{color:var(--muted-2); font-size:12.5px; padding:24px 4px; text-align:center; line-height:1.6;}
+
+/* ---- 증권 탭 전용: 금액/텍스트 확대 ---- */
+#stockView .cat-row{font-size:13.5px; padding:9px 2px;}
+#stockView .cat-row .name{font-size:14px; width:96px;}
+#stockView .cat-row .amt{font-size:16px; font-weight:800; width:130px;}
+#stockView .stock-broker-meta{font-size:12.5px !important;}
+#stockView .cat-item-row{font-size:13.5px; padding:7px 0 !important;}
+#stockView .cat-item-amt{font-size:14.5px; font-weight:800;}
+#stockView .pnl-amt{font-size:12.5px; margin-left:8px;}
+#stockView .stock-badge{font-size:12.5px; padding:3px 10px;}
+#stockView table.stock-table{font-size:13px;}
+#stockView table.stock-table td.num{font-size:13.5px; font-weight:700;}
+#stockView table.stock-table .stock-name{font-size:13.5px;}
+#stockView .kpi-card .value{font-size:23px;}
 
 footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2); font-size:11px;}
 
@@ -304,6 +318,17 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
         </div>
       </div>
 
+      <div class="panel-grid">
+        <div class="panel">
+          <h3>일별 자산 추이 <span class="tag" id="stockDailyTag"></span></h3>
+          <div class="chart-wrap tall"><canvas id="stockDailyChart"></canvas></div>
+        </div>
+        <div class="panel">
+          <h3>일별 마감 내역</h3>
+          <div class="cat-list" id="stockDailyList" style="max-height:320px; overflow-y:auto;"></div>
+        </div>
+      </div>
+
       <div class="panel" style="margin-bottom:14px;">
         <h3>보유 종목 <span class="tag" id="stockHoldingsTag"></span></h3>
         <div class="stock-table-wrap">
@@ -330,6 +355,6 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
 <footer>구글 시트 원본 데이터를 실시간으로 불러옵니다 · 브라우저 로컬에만 캐시됩니다</footer>
 
 <script src="config.js"></script>
-<script src="app.js?v=20260817a"></script>
+<script src="app.js?v=20260819a"></script>
 </body>
 </html>

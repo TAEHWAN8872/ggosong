@@ -5,6 +5,7 @@ const state = {
   monthly: {},      // { 1: {income, expense, savings, categories:{}}, ... }
   side: null,        // { months:[...], categories:{...} }
   stocks: null,      // { holdings:[...], totalValue, totalBuy, totalPnl, totalRate, byBroker:{}, byRegion:{}, byAccount:{} }
+  stockHistory: [],  // [{date:"2026-08-19", value, buy, pnl, rate}, ...] — 00시 마감 기준 일별 자산 스냅샷
   selectedMonth: "total", // "total" = 종합(1~8월 합계), 또는 1~8 숫자(해당 월)
   view: "budget",    // "budget" = 가계부 탭들, "stocks" = 증권 탭
   expandedCats: new Set(), // 지출 카테고리 목록에서 펼쳐진 항목들
@@ -16,6 +17,8 @@ const state = {
 
 // 증권 탭이 읽어올 구글 시트 탭 이름 (시트 쪽 탭 이름을 바꾸면 여기도 맞춰주세요)
 const STOCK_SHEET_NAME = "증권";
+// 매일 00시 마감 스냅샷이 쌓이는 시트 탭 이름 (Apps Script가 여기에 기록함, 아직 없어도 앱은 정상 동작함)
+const STOCK_HISTORY_SHEET_NAME = "일별자산";
 
 const $ = (sel) => document.querySelector(sel);
 const fmtWon = (n) => (n < 0 ? "-" : "") + "₩" + Math.abs(Math.round(n)).toLocaleString("ko-KR");
@@ -117,6 +120,17 @@ async function fetchGrids(sheetNames) {
     out[sheetNames[i]] = vr.values || [];
   });
   return out;
+}
+
+// 일별자산 시트처럼 "아직 없을 수도 있는" 탭을 따로 불러올 때 씀.
+// 시트가 없으면 batchGet 전체가 400 에러로 실패하므로, 메인 데이터 로드에 영향이 없도록 별도로 감싸서 실패를 무시함.
+async function fetchGridOptional(sheetName) {
+  try {
+    const grids = await fetchGrids([sheetName]);
+    return grids[sheetName] || [];
+  } catch (e) {
+    return []; // 탭이 아직 없거나(스크립트 미설정) 접근 실패 → 조용히 빈 배열로 처리
+  }
 }
 
 // ============================================
@@ -297,6 +311,46 @@ function parseStocks(grid) {
     byRegion: groupSum((h) => h.region),
     byAccount: groupSum((h) => h.account),
   };
+}
+
+// ============================================
+// 파서 2-2: 일별 자산 스냅샷 시트 (매일 00시 마감 기록)
+// ============================================
+// 기대하는 헤더(1행): 날짜 | 총평가금액 | 총매입금액 | 총손익 | 손익률
+// Apps Script(daily-snapshot.gs)가 매일 자정 무렵 자동으로 한 줄씩 append 해줌
+function parseStockHistory(grid) {
+  if (!grid || grid.length < 2) return [];
+  const header = (grid[0] || []).map((v) => trimStr(v));
+  const colDate = header.indexOf("날짜");
+  const colValue = header.indexOf("총평가금액");
+  const colBuy = header.indexOf("총매입금액");
+  const colPnl = header.indexOf("총손익");
+  const colRate = header.indexOf("손익률");
+  if (colDate === -1 || colValue === -1) return [];
+
+  // 구글 시트 날짜 시리얼 넘버(예: 46000)를 yyyy-MM-dd 문자열로 변환
+  const serialToDateStr = (n) => {
+    const epoch = Date.UTC(1899, 11, 30);
+    const d = new Date(epoch + n * 86400000);
+    const pad = (v) => String(v).padStart(2, "0");
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  };
+
+  const rows = [];
+  for (let r = 1; r < grid.length; r++) {
+    const row = grid[r] || [];
+    if (rowIsBlank(row, [colDate, colValue])) continue;
+    const rawDate = row[colDate];
+    const date = isNum(rawDate) ? serialToDateStr(rawDate) : trimStr(rawDate);
+    if (!date) continue;
+    const value = toNum(row[colValue]);
+    const buy = colBuy >= 0 ? toNum(row[colBuy]) : null;
+    const pnl = colPnl >= 0 ? toNum(row[colPnl]) : buy !== null ? value - buy : null;
+    const rate = colRate >= 0 ? toNum(row[colRate]) : buy ? pnl / buy : 0;
+    rows.push({ date, value, buy, pnl, rate });
+  }
+  rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  return rows;
 }
 
 // ============================================
@@ -712,6 +766,7 @@ async function loadAll(forceRefresh) {
       state.monthly = parsed.monthly;
       state.side = parsed.side;
       state.stocks = parsed.stocks || null;
+      state.stockHistory = parsed.stockHistory || [];
       renderAll();
       setSyncStatus("캐시됨 · " + new Date(parsed.ts).toLocaleTimeString("ko-KR"));
       return;
@@ -724,11 +779,12 @@ async function loadAll(forceRefresh) {
     STOCK_SHEET_NAME,
     ...CONFIG.MONTHS.map((m) => CONFIG.monthMeta(m).sheetName),
   ];
-  const grids = await fetchGrids(sheetNames);
+  const [grids, historyGrid] = await Promise.all([fetchGrids(sheetNames), fetchGridOptional(STOCK_HISTORY_SHEET_NAME)]);
 
   const annual = parseAnnualSummary(grids[CONFIG.SHEET_NAMES.ANNUAL]);
   const side = parseSideBusiness(grids[CONFIG.SHEET_NAMES.SIDE_BUSINESS]);
   const stocks = parseStocks(grids[STOCK_SHEET_NAME]);
+  const stockHistory = parseStockHistory(historyGrid);
 
   const monthly = {};
   for (const m of CONFIG.MONTHS) {
@@ -754,7 +810,8 @@ async function loadAll(forceRefresh) {
   state.monthly = monthly;
   state.side = side;
   state.stocks = stocks;
-  sessionStorage.setItem(cacheKey, JSON.stringify({ monthly, side, stocks, ts: Date.now() }));
+  state.stockHistory = stockHistory;
+  sessionStorage.setItem(cacheKey, JSON.stringify({ monthly, side, stocks, stockHistory, ts: Date.now() }));
 
   renderAll();
   setSyncStatus("방금 동기화됨 · " + new Date().toLocaleTimeString("ko-KR"));
@@ -1564,8 +1621,86 @@ function rateClass(n) {
   return "flat";
 }
 
+// ---- 일별 자산 추이(00시 마감 스냅샷) ----
+function renderStockDailyPanel() {
+  destroyChart("stockDaily");
+  const tagEl = $("#stockDailyTag");
+  const chartCanvas = $("#stockDailyChart");
+  const listEl = $("#stockDailyList");
+  if (!tagEl || !chartCanvas || !listEl) return;
+
+  const history = state.stockHistory || [];
+
+  if (!history.length) {
+    tagEl.textContent = "";
+    listEl.innerHTML = `<div class="stock-empty">아직 일별 마감 기록이 없어요.<br>구글 시트에 "${STOCK_HISTORY_SHEET_NAME}" 탭을 만들고 매일 00시 무렵 자동으로 그날의 총평가금액을 기록하는 스크립트를 연결하면, 여기에 날짜별 변화가 하루씩 쌓여요.</div>`;
+    return;
+  }
+
+  tagEl.textContent = `최근 ${history.length}일 · 00시 마감 기준`;
+
+  const labels = history.map((h) => h.date.slice(5)); // MM-DD 만 표시
+  const values = history.map((h) => h.value);
+
+  state.charts.stockDaily = new Chart(chartCanvas, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "총평가금액",
+          data: values,
+          borderColor: "#3a6fb0",
+          backgroundColor: "rgba(58,111,176,0.12)",
+          fill: true,
+          tension: 0.3,
+          pointBackgroundColor: "#3a6fb0",
+          pointRadius: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (ctx) => `총평가금액: ${maskWon(ctx.raw)}` } },
+      },
+      scales: {
+        x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
+        y: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => maskShort(v) } },
+      },
+    },
+  });
+
+  // 최신 날짜가 위로 오도록 뒤집고, 전날 대비 변화(금액/등락률)를 같이 보여줌
+  const rows = [...history].reverse();
+  listEl.innerHTML = rows
+    .map((h, i) => {
+      const prev = rows[i + 1]; // 뒤집었으므로 다음 인덱스가 전날
+      const diff = prev ? h.value - prev.value : null;
+      const diffRate = prev && prev.value ? diff / prev.value : null;
+      const cls = diff == null ? "flat" : rateClass(diffRate || 0);
+      const diffHtml =
+        diff !== null
+          ? `<span class="pnl-amt" style="color:${diff >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${maskWonSigned(diff)}</span>
+             <span class="stock-badge ${cls}">${fmtPct(diffRate || 0)}</span>`
+          : `<span class="pnl-amt" style="color:var(--muted-2);">첫 기록</span>`;
+      return `
+      <div class="cat-item-row" style="padding:7px 0; align-items:center;">
+        <span>${h.date}</span>
+        <span class="cat-item-amt" style="display:flex; align-items:center; gap:6px;">
+          ${maskWon(h.value)}
+          ${diffHtml}
+        </span>
+      </div>`;
+    })
+    .join("");
+}
+
 function renderStockPanel() {
   ["stockRegion", "stockAccount"].forEach((k) => destroyChart(k));
+  renderStockDailyPanel(); // 보유 종목 유무와 상관없이 일별 마감 기록은 항상 시도
 
   const s = state.stocks;
   const kpiGrid = $("#stockKpiGrid");
@@ -1636,7 +1771,7 @@ function renderStockPanel() {
           <div class="bar-track"><div class="bar-fill" style="width:${(v.value / maxBrokerVal) * 100}%; background:var(--stock);"></div></div>
           <div class="amt">${maskWon(v.value)}</div>
         </div>
-        <div style="padding:0 2px 8px 98px; font-size:11px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <div class="stock-broker-meta" style="padding:0 2px 8px 98px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
           <span class="stock-badge ${cls}">${fmtPct(v.rate)}</span>
           <span class="pnl-amt" style="color:${v.pnl >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${fmtWonSigned(v.pnl)}</span>
           <span style="color:var(--muted-2);">매입 ${maskWon(v.buy)}</span>
