@@ -200,6 +200,13 @@ table.stock-table th.sortable.active .sort-arrow{color:var(--accent);}
 
 .stock-empty{color:var(--muted-2); font-size:12.5px; padding:24px 4px; text-align:center; line-height:1.6;}
 
+.select-mini{
+  background:var(--surface-2); color:var(--text); border:1px solid var(--border);
+  padding:5px 8px; border-radius:8px; font-size:12.5px; font-weight:600; cursor:pointer;
+  max-width:150px; text-overflow:ellipsis;
+}
+.select-mini:hover{border-color:#c9ced9;}
+
 /* ---- 증권 탭 전용: 금액/텍스트 확대 ---- */
 #stockView .cat-row{font-size:13.5px; padding:9px 2px;}
 #stockView .cat-row .name{font-size:14px; width:96px;}
@@ -329,6 +336,23 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
         </div>
       </div>
 
+      <div class="panel-grid">
+        <div class="panel">
+          <h3>
+            <span style="display:flex; align-items:center; gap:8px; min-width:0;">
+              종목별 일별 추이
+              <select id="stockDailyTickerSelect" class="select-mini"></select>
+            </span>
+            <span class="tag" id="stockDailyTickerTag"></span>
+          </h3>
+          <div class="chart-wrap tall"><canvas id="stockDailyTickerChart"></canvas></div>
+        </div>
+        <div class="panel">
+          <h3>일별 변화 내역</h3>
+          <div class="cat-list" id="stockDailyTickerList" style="max-height:320px; overflow-y:auto;"></div>
+        </div>
+      </div>
+
       <div class="panel" style="margin-bottom:14px;">
         <h3>보유 종목 <span class="tag" id="stockHoldingsTag"></span></h3>
         <div class="stock-table-wrap">
@@ -355,6 +379,6 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
 <footer>구글 시트 원본 데이터를 실시간으로 불러옵니다 · 브라우저 로컬에만 캐시됩니다</footer>
 
 <script src="config.js"></script>
-<script src="app.js?v=20260819a"></script>
+<script src="app.js?v=20260820a"></script>
 </body>
 </html>

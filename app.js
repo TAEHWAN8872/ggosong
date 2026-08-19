@@ -6,6 +6,8 @@ const state = {
   side: null,        // { months:[...], categories:{...} }
   stocks: null,      // { holdings:[...], totalValue, totalBuy, totalPnl, totalRate, byBroker:{}, byRegion:{}, byAccount:{} }
   stockHistory: [],  // [{date:"2026-08-19", value, buy, pnl, rate}, ...] — 00시 마감 기준 일별 자산 스냅샷
+  stockDetailHistory: {}, // { "티커또는종목명": { name, ticker, rows:[{date, value, buy, pnl, rate}, ...] } } — 종목별 일별 스냅샷
+  selectedDailyTicker: null, // "종목별 일별 추이" 패널에서 현재 선택된 종목 key
   selectedMonth: "total", // "total" = 종합(1~8월 합계), 또는 1~8 숫자(해당 월)
   view: "budget",    // "budget" = 가계부 탭들, "stocks" = 증권 탭
   expandedCats: new Set(), // 지출 카테고리 목록에서 펼쳐진 항목들
@@ -19,6 +21,8 @@ const state = {
 const STOCK_SHEET_NAME = "증권";
 // 매일 00시 마감 스냅샷이 쌓이는 시트 탭 이름 (Apps Script가 여기에 기록함, 아직 없어도 앱은 정상 동작함)
 const STOCK_HISTORY_SHEET_NAME = "일별자산";
+// 종목별 00시 마감 스냅샷이 쌓이는 시트 탭 이름
+const STOCK_DETAIL_HISTORY_SHEET_NAME = "종목별일별자산";
 
 const $ = (sel) => document.querySelector(sel);
 const fmtWon = (n) => (n < 0 ? "-" : "") + "₩" + Math.abs(Math.round(n)).toLocaleString("ko-KR");
@@ -351,6 +355,56 @@ function parseStockHistory(grid) {
   }
   rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   return rows;
+}
+
+// ============================================
+// 파서 2-3: 종목별 일별 스냅샷 시트 (매일 00시 마감 기록)
+// ============================================
+// 기대하는 헤더(1행): 날짜 | 티커 | 종목명 | 평가금액 | 매입금액 | 손익 | 손익률
+// 같은 종목이 여러 날짜에 걸쳐 여러 줄로 쌓이며, 티커(없으면 종목명)를 key로 묶음
+function parseStockDetailHistory(grid) {
+  if (!grid || grid.length < 2) return {};
+  const header = (grid[0] || []).map((v) => trimStr(v));
+  const colDate = header.indexOf("날짜");
+  const colTicker = header.indexOf("티커");
+  const colName = header.indexOf("종목명");
+  const colValue = header.indexOf("평가금액");
+  const colBuy = header.indexOf("매입금액");
+  const colPnl = header.indexOf("손익");
+  const colRate = header.indexOf("손익률");
+  if (colDate === -1 || colValue === -1 || (colTicker === -1 && colName === -1)) return {};
+
+  const serialToDateStr = (n) => {
+    const epoch = Date.UTC(1899, 11, 30);
+    const d = new Date(epoch + n * 86400000);
+    const pad = (v) => String(v).padStart(2, "0");
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  };
+
+  const out = {};
+  for (let r = 1; r < grid.length; r++) {
+    const row = grid[r] || [];
+    if (rowIsBlank(row, [colDate, colValue])) continue;
+    const rawDate = row[colDate];
+    const date = isNum(rawDate) ? serialToDateStr(rawDate) : trimStr(rawDate);
+    if (!date) continue;
+
+    const ticker = colTicker >= 0 ? trimStr(row[colTicker]) : "";
+    const name = colName >= 0 ? trimStr(row[colName]) : "";
+    if (!ticker && !name) continue;
+    const key = ticker || name;
+
+    const value = toNum(row[colValue]);
+    const buy = colBuy >= 0 ? toNum(row[colBuy]) : null;
+    const pnl = colPnl >= 0 ? toNum(row[colPnl]) : buy !== null ? value - buy : null;
+    const rate = colRate >= 0 ? toNum(row[colRate]) : buy ? pnl / buy : 0;
+
+    if (!out[key]) out[key] = { name: name || ticker, ticker, rows: [] };
+    out[key].rows.push({ date, value, buy, pnl, rate });
+  }
+
+  Object.values(out).forEach((h) => h.rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)));
+  return out;
 }
 
 // ============================================
@@ -767,6 +821,7 @@ async function loadAll(forceRefresh) {
       state.side = parsed.side;
       state.stocks = parsed.stocks || null;
       state.stockHistory = parsed.stockHistory || [];
+      state.stockDetailHistory = parsed.stockDetailHistory || {};
       renderAll();
       setSyncStatus("캐시됨 · " + new Date(parsed.ts).toLocaleTimeString("ko-KR"));
       return;
@@ -779,12 +834,17 @@ async function loadAll(forceRefresh) {
     STOCK_SHEET_NAME,
     ...CONFIG.MONTHS.map((m) => CONFIG.monthMeta(m).sheetName),
   ];
-  const [grids, historyGrid] = await Promise.all([fetchGrids(sheetNames), fetchGridOptional(STOCK_HISTORY_SHEET_NAME)]);
+  const [grids, historyGrid, detailHistoryGrid] = await Promise.all([
+    fetchGrids(sheetNames),
+    fetchGridOptional(STOCK_HISTORY_SHEET_NAME),
+    fetchGridOptional(STOCK_DETAIL_HISTORY_SHEET_NAME),
+  ]);
 
   const annual = parseAnnualSummary(grids[CONFIG.SHEET_NAMES.ANNUAL]);
   const side = parseSideBusiness(grids[CONFIG.SHEET_NAMES.SIDE_BUSINESS]);
   const stocks = parseStocks(grids[STOCK_SHEET_NAME]);
   const stockHistory = parseStockHistory(historyGrid);
+  const stockDetailHistory = parseStockDetailHistory(detailHistoryGrid);
 
   const monthly = {};
   for (const m of CONFIG.MONTHS) {
@@ -811,7 +871,11 @@ async function loadAll(forceRefresh) {
   state.side = side;
   state.stocks = stocks;
   state.stockHistory = stockHistory;
-  sessionStorage.setItem(cacheKey, JSON.stringify({ monthly, side, stocks, stockHistory, ts: Date.now() }));
+  state.stockDetailHistory = stockDetailHistory;
+  sessionStorage.setItem(
+    cacheKey,
+    JSON.stringify({ monthly, side, stocks, stockHistory, stockDetailHistory, ts: Date.now() })
+  );
 
   renderAll();
   setSyncStatus("방금 동기화됨 · " + new Date().toLocaleTimeString("ko-KR"));
@@ -1698,9 +1762,120 @@ function renderStockDailyPanel() {
     .join("");
 }
 
+// ---- 종목별 일별 추이(00시 마감 스냅샷, 드롭다운으로 종목 선택) ----
+function renderStockDailyTickerPanel() {
+  destroyChart("stockDailyTicker");
+  const selectEl = $("#stockDailyTickerSelect");
+  const tagEl = $("#stockDailyTickerTag");
+  const chartCanvas = $("#stockDailyTickerChart");
+  const listEl = $("#stockDailyTickerList");
+  if (!selectEl || !tagEl || !chartCanvas || !listEl) return;
+
+  const detail = state.stockDetailHistory || {};
+  const keys = Object.keys(detail);
+
+  if (!keys.length) {
+    selectEl.innerHTML = "";
+    selectEl.disabled = true;
+    tagEl.textContent = "";
+    listEl.innerHTML = `<div class="stock-empty">아직 종목별 일별 기록이 없어요.<br>Apps Script를 최신 버전(daily-snapshot.gs)으로 업데이트하고 한 번 더 실행하면, "${STOCK_DETAIL_HISTORY_SHEET_NAME}" 탭이 생기고 그날부터 종목별 변화가 쌓여요.</div>`;
+    return;
+  }
+  selectEl.disabled = false;
+
+  // 최신 평가금액이 큰 순서로 정렬 — 큰 종목이 위로 오게
+  const sortedKeys = keys.sort((a, b) => {
+    const av = detail[a].rows[detail[a].rows.length - 1]?.value || 0;
+    const bv = detail[b].rows[detail[b].rows.length - 1]?.value || 0;
+    return bv - av;
+  });
+
+  // 이전에 선택했던 종목이 여전히 존재하면 유지, 아니면 첫 번째로
+  if (!state.selectedDailyTicker || !detail[state.selectedDailyTicker]) {
+    state.selectedDailyTicker = sortedKeys[0];
+  }
+
+  selectEl.innerHTML = sortedKeys
+    .map((k) => `<option value="${k}" ${k === state.selectedDailyTicker ? "selected" : ""}>${detail[k].name}</option>`)
+    .join("");
+  selectEl.onchange = () => {
+    state.selectedDailyTicker = selectEl.value;
+    renderStockDailyTickerPanel();
+  };
+
+  const h = detail[state.selectedDailyTicker];
+  const rows = h.rows;
+
+  if (!rows.length) {
+    tagEl.textContent = "";
+    listEl.innerHTML = `<div class="stock-empty">이 종목은 아직 기록된 날짜가 없어요.</div>`;
+    return;
+  }
+
+  tagEl.textContent = `최근 ${rows.length}일 · 00시 마감 기준`;
+
+  const labels = rows.map((r) => r.date.slice(5));
+  const values = rows.map((r) => r.value);
+
+  state.charts.stockDailyTicker = new Chart(chartCanvas, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: h.name,
+          data: values,
+          borderColor: "#8a5cf6",
+          backgroundColor: "rgba(138,92,246,0.12)",
+          fill: true,
+          tension: 0.3,
+          pointBackgroundColor: "#8a5cf6",
+          pointRadius: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (ctx) => `${h.name}: ${maskWon(ctx.raw)}` } },
+      },
+      scales: {
+        x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
+        y: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => maskShort(v) } },
+      },
+    },
+  });
+
+  const reversed = [...rows].reverse();
+  listEl.innerHTML = reversed
+    .map((r, i) => {
+      const prev = reversed[i + 1];
+      const diff = prev ? r.value - prev.value : null;
+      const diffRate = prev && prev.value ? diff / prev.value : null;
+      const cls = diff == null ? "flat" : rateClass(diffRate || 0);
+      const diffHtml =
+        diff !== null
+          ? `<span class="pnl-amt" style="color:${diff >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${maskWonSigned(diff)}</span>
+             <span class="stock-badge ${cls}">${fmtPct(diffRate || 0)}</span>`
+          : `<span class="pnl-amt" style="color:var(--muted-2);">첫 기록</span>`;
+      return `
+      <div class="cat-item-row" style="padding:7px 0; align-items:center;">
+        <span>${r.date}</span>
+        <span class="cat-item-amt" style="display:flex; align-items:center; gap:6px;">
+          ${maskWon(r.value)}
+          ${diffHtml}
+        </span>
+      </div>`;
+    })
+    .join("");
+}
+
 function renderStockPanel() {
   ["stockRegion", "stockAccount"].forEach((k) => destroyChart(k));
   renderStockDailyPanel(); // 보유 종목 유무와 상관없이 일별 마감 기록은 항상 시도
+  renderStockDailyTickerPanel(); // 종목별 일별 추이도 마찬가지
 
   const s = state.stocks;
   const kpiGrid = $("#stockKpiGrid");
