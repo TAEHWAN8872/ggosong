@@ -221,12 +221,68 @@ table.stock-table th.sortable.active .sort-arrow{color:var(--accent);}
 #stockView table.stock-table .stock-name{font-size:13.5px;}
 #stockView .kpi-card .value{font-size:23px;}
 
+/* ---- 노후계산기 탭 ---- */
+.retire-controls{
+  display:flex; align-items:flex-end; gap:22px; flex-wrap:wrap;
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:16px 18px; margin-bottom:16px; box-shadow:0 1px 3px rgba(16,20,30,0.05);
+}
+.retire-field{display:flex; flex-direction:column; gap:6px;}
+.retire-field label{font-size:11px; color:var(--muted); font-weight:600;}
+.retire-amount-input{
+  display:flex; align-items:center; gap:6px;
+  border:1px solid var(--border); border-radius:8px; padding:8px 12px;
+  background:var(--surface-2);
+}
+.retire-amount-input span{font-size:13px; color:var(--muted); font-weight:700;}
+.retire-amount-input input{
+  border:none; background:transparent; outline:none; width:150px;
+  font-size:15px; font-weight:800; color:var(--text); font-variant-numeric:tabular-nums;
+}
+.retire-quick{display:flex; gap:6px;}
+.retire-quick button{
+  background:var(--surface-2); border:1px solid var(--border); color:var(--text);
+  font-size:11.5px; font-weight:600; padding:6px 10px; border-radius:7px; cursor:pointer;
+}
+.retire-quick button:hover{background:#e9ebef; border-color:#c9ced9;}
+.rate-ribbon{display:flex; gap:6px; flex-wrap:wrap;}
+.rate-chip{
+  min-width:46px; padding:8px 6px; text-align:center;
+  border:1px solid var(--border); border-radius:8px; background:var(--surface);
+  font-size:12.5px; font-weight:700; color:var(--text); cursor:pointer;
+  transition:border-color .15s, transform .1s;
+}
+.rate-chip:hover{border-color:var(--savings); transform:translateY(-1px);}
+.rate-chip.active{border-color:var(--savings); background:var(--savings); color:#fff; box-shadow:0 2px 6px rgba(192,138,46,0.28);}
+.retire-years-input{display:flex; align-items:center; gap:6px;}
+.retire-years-input select{
+  border:1px solid var(--border); border-radius:8px; padding:8px 10px; background:var(--surface-2);
+  font-size:13px; font-weight:700; color:var(--text); cursor:pointer;
+}
+table.retire-table{width:100%; border-collapse:collapse; font-size:12.5px;}
+table.retire-table thead th{
+  position:sticky; top:0; background:var(--surface);
+  text-align:right; font-size:11px; color:var(--muted); font-weight:700;
+  padding:8px 10px; border-bottom:1px solid var(--border);
+}
+table.retire-table thead th:first-child{text-align:left;}
+table.retire-table td{padding:8px 10px; border-bottom:1px solid var(--border); text-align:right; font-variant-numeric:tabular-nums;}
+table.retire-table td:first-child{text-align:left; font-weight:700; color:var(--text);}
+table.retire-table tbody tr:last-child td{border-bottom:none;}
+table.retire-table tbody tr:hover{background:var(--surface-2);}
+table.retire-table td.principal{color:var(--muted);}
+table.retire-table td.profit{color:var(--savings); font-weight:700;}
+table.retire-table td.total{color:var(--text); font-weight:800;}
+table.retire-table tbody tr.milestone{background:rgba(192,138,46,0.06);}
+.retire-table-wrap{max-height:520px; overflow-y:auto;}
+
 footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2); font-size:11px;}
 
 @media (max-width: 860px){
   .kpi-grid{grid-template-columns:repeat(2,1fr);}
   .panel-grid{grid-template-columns:1fr;}
   .month-tile{min-width:56px;}
+  .retire-controls{flex-direction:column; align-items:stretch;}
 }
 </style>
 </head>
@@ -373,12 +429,63 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
         </div>
       </div>
     </div>
+
+    <div id="retirementView" class="hidden">
+      <div class="retire-controls">
+        <div class="retire-field">
+          <label>월 납입 금액</label>
+          <div class="retire-amount-input">
+            <span>₩</span>
+            <input type="text" id="retireMonthlyInput" inputmode="numeric" placeholder="1,000,000">
+          </div>
+        </div>
+        <div class="retire-field">
+          <label>빠른 선택</label>
+          <div class="retire-quick" id="retireQuick"></div>
+        </div>
+        <div class="retire-field" style="flex:1; min-width:220px;">
+          <label>연 수익률</label>
+          <div class="rate-ribbon" id="rateRibbon"></div>
+        </div>
+        <div class="retire-field">
+          <label>기준 연차</label>
+          <div class="retire-years-input">
+            <select id="retireYearSelect"></select>
+          </div>
+        </div>
+      </div>
+
+      <div class="kpi-grid" id="retireKpiGrid"></div>
+
+      <div class="panel-grid">
+        <div class="panel">
+          <h3><span>연차별 원금 · 수익 누적</span> <span class="tag" id="retireChartTag">연 5%</span></h3>
+          <div class="chart-wrap tall"><canvas id="retireChart"></canvas></div>
+        </div>
+        <div class="panel">
+          <h3>연차별 상세 <span class="tag" id="retireTableTag">1~30년차</span></h3>
+          <div class="retire-table-wrap">
+            <table class="retire-table">
+              <thead>
+                <tr>
+                  <th>연차</th>
+                  <th>원금</th>
+                  <th>수익</th>
+                  <th>총액</th>
+                </tr>
+              </thead>
+              <tbody id="retireTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </main>
 
 <footer>구글 시트 원본 데이터를 실시간으로 불러옵니다 · 브라우저 로컬에만 캐시됩니다</footer>
 
 <script src="config.js"></script>
-<script src="app.js?v=20260820a"></script>
+<script src="app.js?v=20260828a"></script>
 </body>
 </html>
