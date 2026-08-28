@@ -431,6 +431,27 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
     </div>
 
     <div id="retirementView" class="hidden">
+      <div class="panel" id="pensionPanel" style="margin-bottom:14px;">
+        <h3>연금저축 계좌 현황 <span class="tag" id="pensionTag">증권 탭 실데이터</span></h3>
+        <div class="kpi-grid" id="pensionKpiGrid"></div>
+        <div class="panel-grid" style="margin-top:14px;">
+          <div style="min-width:0;">
+            <h3 style="font-size:12px; margin:0 0 10px;">종목별 원금 · 평가금액</h3>
+            <div class="chart-wrap" id="pensionChartWrap"><canvas id="pensionChart"></canvas></div>
+          </div>
+          <div style="min-width:0;">
+            <h3 style="font-size:12px; margin:0 0 10px;">보유 종목</h3>
+            <div class="retire-table-wrap" style="max-height:280px;">
+              <table class="retire-table">
+                <thead><tr><th>종목</th><th>원금</th><th>수익</th><th>총액</th></tr></thead>
+                <tbody id="pensionTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="font-size:13px; font-weight:700; color:var(--text); margin:4px 0 -4px;">월 납입 시뮬레이션</div>
       <div class="retire-controls">
         <div class="retire-field">
           <label>월 납입 금액</label>
@@ -486,6 +507,6 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
 <footer>구글 시트 원본 데이터를 실시간으로 불러옵니다 · 브라우저 로컬에만 캐시됩니다</footer>
 
 <script src="config.js"></script>
-<script src="app.js?v=20260828a"></script>
+<script src="app.js?v=20260828b"></script>
 </body>
 </html>
