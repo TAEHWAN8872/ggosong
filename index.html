@@ -446,13 +446,13 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
         <div class="pension-tabs" id="pensionTabs"></div>
         <div class="kpi-grid" id="pensionKpiGrid"></div>
 
-        <div class="pension-section-title">종목별 원금 · 평가금액</div>
+        <div class="pension-section-title" id="pensionChartTitle">종목별 원금 · 평가금액</div>
         <div class="chart-wrap" id="pensionChartWrap"><canvas id="pensionChart"></canvas></div>
 
-        <div class="pension-section-title">보유 종목</div>
+        <div class="pension-section-title" id="pensionTableTitle">보유 종목</div>
         <div class="retire-table-wrap" style="max-height:340px;">
           <table class="retire-table">
-            <thead><tr><th>종목</th><th>원금</th><th>수익</th><th>총액</th></tr></thead>
+            <thead id="pensionTableHead"><tr><th>종목</th><th>원금</th><th>수익</th><th>총액</th></tr></thead>
             <tbody id="pensionTableBody"></tbody>
           </table>
         </div>
@@ -514,6 +514,6 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
 <footer>구글 시트 원본 데이터를 실시간으로 불러옵니다 · 브라우저 로컬에만 캐시됩니다</footer>
 
 <script src="config.js"></script>
-<script src="app.js?v=20260828c"></script>
+<script src="app.js?v=20260828d"></script>
 </body>
 </html>
