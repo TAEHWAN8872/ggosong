@@ -1078,12 +1078,19 @@ function renderKpis(sel) {
 
 // ============================================
 // 연금 계좌 현황 — 노후계산기 탭 상단 "송 연금저축" / "꼬 퇴직금" 탭 전환
-// · 송 연금저축: 증권 탭 실데이터에서 "계좌구분"이 "송 연금저축"인 보유 종목을 추림
+// · 송 연금저축: 증권 탭 실데이터에서 "계좌구분"이 "연금저축"인 보유 종목을 추림 (탭 라벨과 계좌구분 값이 다름 → PENSION_ACCOUNT_QUERY 매핑 참고)
 // · 꼬 퇴직금: 가계부 탭 실데이터(월별 자산 스냅샷)의 "꼬 퇴직금" 항목 금액을 월별로 추적
 // ============================================
+// 탭 라벨(선택 상태 표시용)과 실제 증권 시트 "계좌구분" 열 값이 다른 계좌들의 매핑.
+// 매핑에 없는 탭은 라벨을 그대로 계좌구분 값으로 사용한다.
+const PENSION_ACCOUNT_QUERY = {
+  "송 연금저축": "연금저축", // 증권 시트의 계좌구분 값은 "연금저축"으로 입력되어 있음
+};
+
 function getPensionHoldings(accountName) {
+  const queryName = PENSION_ACCOUNT_QUERY[accountName] || accountName;
   const holdings = (state.stocks && state.stocks.holdings) || [];
-  return holdings.filter((h) => (h.account || "").trim() === accountName);
+  return holdings.filter((h) => (h.account || "").trim() === queryName);
 }
 
 // "꼬 퇴직금" 탭 전용: 증권 데이터가 아니라 가계부(월별 시트)의 자산 스냅샷에서
@@ -1153,11 +1160,12 @@ function renderPensionFromStocks(accountName) {
   }
 
   if (!rows.length) {
+    const queryName = PENSION_ACCOUNT_QUERY[accountName] || accountName;
     tag.textContent = "";
     kpiGrid.innerHTML = "";
     tbody.innerHTML = "";
     chartWrap.style.height = "";
-    chartWrap.innerHTML = `<div class="stock-empty">증권 탭에 계좌구분이 "${accountName}"인 보유 종목이 없어요.<br>증권 시트의 "계좌구분" 열 값이 정확히 "${accountName}"으로 입력되어 있는지 확인해주세요.</div>`;
+    chartWrap.innerHTML = `<div class="stock-empty">증권 탭에 계좌구분이 "${queryName}"인 보유 종목이 없어요.<br>증권 시트의 "계좌구분" 열 값이 정확히 "${queryName}"으로 입력되어 있는지 확인해주세요.</div>`;
     return;
   }
 
