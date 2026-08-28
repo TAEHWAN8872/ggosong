@@ -1077,12 +1077,23 @@ function renderKpis(sel) {
 }
 
 // ============================================
-// 연금 계좌 현황 (증권 탭 실데이터에서 "계좌구분"이 PENSION_ACCOUNTS 목록의
-// 값 중 하나와 정확히 일치하는 종목만 추림 — 노후계산기 탭 상단 "송 연금저축" / "꼬 퇴직금" 탭 전환)
+// 연금 계좌 현황 — 노후계산기 탭 상단 "송 연금저축" / "꼬 퇴직금" 탭 전환
+// · 송 연금저축: 증권 탭 실데이터에서 "계좌구분"이 "송 연금저축"인 보유 종목을 추림
+// · 꼬 퇴직금: 가계부 탭 실데이터(월별 자산 스냅샷)의 "꼬 퇴직금" 항목 금액을 월별로 추적
 // ============================================
 function getPensionHoldings(accountName) {
   const holdings = (state.stocks && state.stocks.holdings) || [];
   return holdings.filter((h) => (h.account || "").trim() === accountName);
+}
+
+// "꼬 퇴직금" 탭 전용: 증권 데이터가 아니라 가계부(월별 시트)의 자산 스냅샷에서
+// 이름이 assetName과 정확히 일치하는 항목의 금액을 월별로 모아 추이를 만든다.
+function getBudgetAssetSeries(assetName) {
+  return CONFIG.MONTHS.filter((m) => state.monthly[m]?.assetSnapshot).map((m) => {
+    const snap = state.monthly[m].assetSnapshot;
+    const item = [...snap.cash, ...snap.assets, ...snap.realEstate].find((i) => i.name === assetName);
+    return { month: m, value: item ? item.value : 0 };
+  });
 }
 
 // 노후계산기 탭 "연금 계좌 현황" 패널 상단의 계좌 탭 버튼(송 연금저축 / 꼬 퇴직금) 렌더링
@@ -1107,14 +1118,30 @@ function renderPensionPanel() {
   renderPensionTabs();
 
   const accountName = state.selectedPensionAccount || PENSION_ACCOUNTS[0];
-  const rows = getPensionHoldings(accountName);
   const titleEl = $("#pensionTitleText");
+  if (titleEl) titleEl.textContent = `${accountName} 현황`;
+
+  // 송 연금저축 = 증권 탭 실데이터(보유 종목), 꼬 퇴직금 = 가계부 탭 실데이터(월별 자산 스냅샷)
+  if (accountName === "꼬 퇴직금") {
+    renderPensionFromBudget(accountName);
+  } else {
+    renderPensionFromStocks(accountName);
+  }
+}
+
+function renderPensionFromStocks(accountName) {
+  const rows = getPensionHoldings(accountName);
   const tag = $("#pensionTag");
   const kpiGrid = $("#pensionKpiGrid");
   const tbody = $("#pensionTableBody");
   const chartWrap = $("#pensionChartWrap");
+  const chartTitle = $("#pensionChartTitle");
+  const tableTitle = $("#pensionTableTitle");
+  const tableHead = $("#pensionTableHead");
 
-  if (titleEl) titleEl.textContent = `${accountName} 현황`;
+  if (chartTitle) chartTitle.textContent = "종목별 원금 · 평가금액";
+  if (tableTitle) tableTitle.textContent = "보유 종목";
+  if (tableHead) tableHead.innerHTML = "<tr><th>종목</th><th>원금</th><th>수익</th><th>총액</th></tr>";
 
   if (!state.stocks) {
     tag.textContent = "";
@@ -1214,6 +1241,120 @@ function renderPensionPanel() {
 
   tbody.innerHTML =
     sorted.map((h) => rowHtml(h.name, h.buy, h.value)).join("") + rowHtml("합계", totalBuy, totalValue, "milestone");
+}
+
+// "꼬 퇴직금" 탭: 증권 데이터가 아니라 가계부 탭의 월별 자산 스냅샷(ASSET_SNAPSHOT_CONFIG)에서
+// "꼬 퇴직금" 항목 금액을 월별로 모아 추이/증감을 보여준다.
+function renderPensionFromBudget(accountName) {
+  const tag = $("#pensionTag");
+  const kpiGrid = $("#pensionKpiGrid");
+  const tbody = $("#pensionTableBody");
+  const chartWrap = $("#pensionChartWrap");
+  const chartTitle = $("#pensionChartTitle");
+  const tableTitle = $("#pensionTableTitle");
+  const tableHead = $("#pensionTableHead");
+
+  if (chartTitle) chartTitle.textContent = "월별 퇴직금 추이";
+  if (tableTitle) tableTitle.textContent = "월별 상세";
+  if (tableHead) tableHead.innerHTML = "<tr><th>월</th><th>잔액</th><th>전월 대비</th><th>연초 대비</th></tr>";
+
+  const series = getBudgetAssetSeries(accountName);
+
+  if (!series.length) {
+    tag.textContent = "";
+    kpiGrid.innerHTML = "";
+    tbody.innerHTML = "";
+    chartWrap.style.height = "";
+    chartWrap.innerHTML = `<div class="stock-empty">가계부 탭에 "${accountName}" 자산 스냅샷 데이터가 아직 없어요.<br>월별 시트의 해당 셀 참조(ASSET_SNAPSHOT_CONFIG)가 채워져 있는지 확인해주세요.</div>`;
+    return;
+  }
+
+  const first = series[0].value;
+  const last = series[series.length - 1].value;
+  const prev = series.length > 1 ? series[series.length - 2].value : null;
+  const deltaSinceStart = last - first;
+  const deltaFromPrev = prev !== null ? last - prev : null;
+
+  tag.textContent = `${series.length}개월 데이터 · 가계부 탭 실데이터`;
+
+  const cards = [
+    { label: `현재 잔액 (${series[series.length - 1].month}월 기준)`, value: last, color: "var(--savings)" },
+    { label: "전월 대비", value: deltaFromPrev, color: "var(--income)", signed: true, empty: deltaFromPrev === null },
+    { label: `연초(${series[0].month}월) 대비`, value: deltaSinceStart, color: "var(--accent)", signed: true },
+  ];
+  kpiGrid.innerHTML = cards
+    .map((c) => {
+      const valueHtml = c.empty
+        ? `<span style="font-size:13px; color:var(--muted); font-weight:600;">전월 데이터 없음</span>`
+        : c.signed
+        ? maskWonSigned(c.value)
+        : maskWon(c.value);
+      return `
+    <div class="kpi-card">
+      <div class="label"><span class="dot" style="background:${c.color}"></span>${c.label}</div>
+      <div class="value" ${c.signed && !c.empty ? `style="color:${c.value >= 0 ? "var(--stock-up)" : "var(--stock-down)"}"` : ""}>${valueHtml}</div>
+    </div>`;
+    })
+    .join("");
+
+  chartWrap.innerHTML = `<canvas id="pensionChart"></canvas>`;
+  chartWrap.style.height = "";
+
+  const labels = series.map((s) => `${s.month}월`);
+  const values = series.map((s) => s.value);
+
+  state.charts.pension = new Chart($("#pensionChart"), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "꼬 퇴직금",
+          data: values,
+          borderColor: "var(--savings)",
+          backgroundColor: "rgba(192,138,46,0.12)",
+          fill: true,
+          tension: 0.3,
+          pointRadius: 4,
+          pointBackgroundColor: "var(--savings)",
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (ctx) => maskWon(ctx.raw) } },
+      },
+      scales: {
+        x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280" } },
+        y: {
+          grid: { color: "#e2e5eb" },
+          suggestedMax: Math.max(...values, 1) * 1.15,
+          ticks: { color: "#6b7280", callback: (v) => maskShort(v) },
+        },
+      },
+    },
+  });
+
+  const rowHtml = (month, value, deltaPrev, deltaStart, cls) => `
+      <tr class="${cls || ""}">
+        <td>${month}</td>
+        <td class="total">${maskWon(value)}</td>
+        <td class="profit" style="color:${deltaPrev === null ? "var(--muted-2)" : deltaPrev >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${
+    deltaPrev === null ? "-" : maskWonSigned(deltaPrev)
+  }</td>
+        <td class="profit" style="color:${deltaStart >= 0 ? "var(--stock-up)" : "var(--stock-down)"}">${maskWonSigned(deltaStart)}</td>
+      </tr>`;
+
+  tbody.innerHTML = series
+    .map((s, i) => {
+      const dPrev = i > 0 ? s.value - series[i - 1].value : null;
+      const dStart = s.value - first;
+      return rowHtml(`${s.month}월`, s.value, dPrev, dStart);
+    })
+    .join("");
 }
 
 // ============================================
