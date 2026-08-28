@@ -1072,6 +1072,116 @@ function renderKpis(sel) {
 }
 
 // ============================================
+// 연금저축 계좌 현황 (증권 탭 실데이터에서 계좌구분에 "연금"이 포함된 종목만 추림)
+// ============================================
+function getPensionHoldings() {
+  const holdings = (state.stocks && state.stocks.holdings) || [];
+  return holdings.filter((h) => (h.account || "").includes("연금"));
+}
+
+function renderPensionPanel() {
+  destroyChart("pension");
+  const rows = getPensionHoldings();
+  const tag = $("#pensionTag");
+  const kpiGrid = $("#pensionKpiGrid");
+  const tbody = $("#pensionTableBody");
+  const chartWrap = $("#pensionChartWrap");
+
+  if (!state.stocks) {
+    tag.textContent = "";
+    kpiGrid.innerHTML = "";
+    tbody.innerHTML = "";
+    chartWrap.innerHTML = `<div class="stock-empty">증권 데이터를 아직 불러오지 못했어요.</div>`;
+    return;
+  }
+
+  if (!rows.length) {
+    tag.textContent = "";
+    kpiGrid.innerHTML = "";
+    tbody.innerHTML = "";
+    chartWrap.innerHTML = `<div class="stock-empty">증권 탭에 계좌구분이 "연금저축"인 보유 종목이 없어요.<br>증권 시트의 "계좌구분" 열 값이 연금저축 계좌는 "연금저축"으로 입력되어 있는지 확인해주세요.</div>`;
+    return;
+  }
+
+  const totalBuy = rows.reduce((s, h) => s + h.buy, 0);
+  const totalValue = rows.reduce((s, h) => s + h.value, 0);
+  const totalPnl = totalValue - totalBuy;
+  const totalRate = totalBuy ? totalPnl / totalBuy : 0;
+  const pnlColor = totalPnl >= 0 ? "var(--stock-up)" : "var(--stock-down)";
+
+  tag.textContent = `${rows.length}개 종목 · 증권 탭 실데이터`;
+
+  kpiGrid.innerHTML = `
+    <div class="kpi-card">
+      <div class="label"><span class="dot" style="background:var(--muted-2)"></span>총 원금(매입금액)</div>
+      <div class="value">${maskWon(totalBuy)}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label"><span class="dot" style="background:${pnlColor}"></span>총 수익(손익)</div>
+      <div class="value" style="color:${pnlColor}">${maskWonSigned(totalPnl)}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label"><span class="dot" style="background:var(--stock)"></span>총 평가금액</div>
+      <div class="value">${maskWon(totalValue)}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label"><span class="dot" style="background:${pnlColor}"></span>수익률</div>
+      <div class="value" style="color:${pnlColor}">${state.hideAmounts ? "••%" : fmtPct(totalRate)}</div>
+    </div>`;
+
+  // 빈 상태였을 수도 있으니 캔버스를 다시 보장한 뒤 그림
+  chartWrap.innerHTML = `<canvas id="pensionChart"></canvas>`;
+
+  const sorted = [...rows].sort((a, b) => b.value - a.value);
+  const labels = sorted.map((h) => h.name);
+  const buyData = sorted.map((h) => h.buy);
+  const valueData = sorted.map((h) => h.value);
+
+  state.charts.pension = new Chart($("#pensionChart"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label: "원금", data: buyData, backgroundColor: "#c9ced9", borderRadius: 4 },
+        { label: "평가금액", data: valueData, backgroundColor: "#3a6fb0", borderRadius: 4 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: ${maskWon(ctx.raw)}`,
+            footer: (items) => `손익: ${maskWonSigned(valueData[items[0].dataIndex] - buyData[items[0].dataIndex])}`,
+          },
+        },
+      },
+      scales: {
+        x: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", maxRotation: 0, autoSkip: true } },
+        y: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => maskShort(v) } },
+      },
+    },
+  });
+
+  const rowHtml = (name, buy, value, cls) => {
+    const pnl = value - buy;
+    const color = pnl >= 0 ? "var(--stock-up)" : "var(--stock-down)";
+    return `
+      <tr class="${cls || ""}">
+        <td>${name}</td>
+        <td class="principal">${maskWon(buy)}</td>
+        <td class="profit" style="color:${color}">${maskWonSigned(pnl)}</td>
+        <td class="total">${maskWon(value)}</td>
+      </tr>`;
+  };
+
+  tbody.innerHTML =
+    sorted.map((h) => rowHtml(h.name, h.buy, h.value)).join("") + rowHtml("합계", totalBuy, totalValue, "milestone");
+}
+
+// ============================================
 // 노후계산기 (월 납입액 + 수익률 → 연차별 원금/수익/총액 계산)
 // ============================================
 
@@ -1234,6 +1344,7 @@ function renderRetirementTable(rows) {
 }
 
 function renderRetirementPanel() {
+  renderPensionPanel();
   renderRetirementControls();
   const r = state.retirement;
   const rows = calcRetirementRows(r.monthly, r.rate, RETIRE_MAX_YEARS);
