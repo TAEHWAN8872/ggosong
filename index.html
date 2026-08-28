@@ -277,6 +277,14 @@ table.retire-table tbody tr.milestone{background:rgba(192,138,46,0.06);}
 .retire-table-wrap{max-height:520px; overflow-y:auto; overflow-x:auto;}
 .pension-section-title{font-size:12px; font-weight:700; color:var(--text); margin:18px 0 10px;}
 .pension-section-title:first-of-type{margin-top:2px;}
+.pension-tabs{display:flex; gap:6px; margin:2px 0 14px;}
+.pension-tab{
+  padding:8px 14px; border:1px solid var(--border); border-radius:8px; background:var(--surface);
+  font-size:12.5px; font-weight:700; color:var(--text); cursor:pointer;
+  transition:border-color .15s, transform .1s;
+}
+.pension-tab:hover{border-color:var(--stock); transform:translateY(-1px);}
+.pension-tab.active{border-color:var(--stock); background:var(--stock); color:#fff; box-shadow:0 2px 6px rgba(58,111,176,0.25);}
 
 footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2); font-size:11px;}
 
@@ -434,7 +442,8 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
 
     <div id="retirementView" class="hidden">
       <div class="panel" id="pensionPanel" style="margin-bottom:14px;">
-        <h3>연금저축 계좌 현황 <span class="tag" id="pensionTag">증권 탭 실데이터</span></h3>
+        <h3><span id="pensionTitleText">송 연금저축 현황</span> <span class="tag" id="pensionTag">증권 탭 실데이터</span></h3>
+        <div class="pension-tabs" id="pensionTabs"></div>
         <div class="kpi-grid" id="pensionKpiGrid"></div>
 
         <div class="pension-section-title">종목별 원금 · 평가금액</div>
