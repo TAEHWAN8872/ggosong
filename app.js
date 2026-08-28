@@ -15,7 +15,17 @@ const state = {
   assetPanelMonth: null, // 종합 탭에서 ◀▶ 로 넘겨보는 자산 현황 대상 월
   stockSort: { key: "value", dir: "desc" }, // 보유 종목 테이블 정렬 기준
   hideAmounts: localStorage.getItem("hideAmounts") === "1", // 금액(원금/평가금액 등) 가리기 여부 — 가계부/증권 탭 공통
+  retirement: {
+    monthly: Number(localStorage.getItem("retireMonthly")) || 1000000, // 월 납입 금액
+    rate: Number(localStorage.getItem("retireRate")) || 5, // 선택된 연 수익률(%) — 1~10
+    years: Number(localStorage.getItem("retireYears")) || 30, // 기준으로 삼을 연차 (KPI 카드용)
+  },
 };
+
+// 노후계산기 탭에서 고를 수 있는 연 수익률(%) 목록
+const RETIRE_RATES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+// 노후계산기 표/차트가 보여줄 최대 연차
+const RETIRE_MAX_YEARS = 30;
 
 // 증권 탭이 읽어올 구글 시트 탭 이름 (시트 쪽 탭 이름을 바꾸면 여기도 맞춰주세요)
 const STOCK_SHEET_NAME = "증권";
@@ -81,6 +91,23 @@ function initApp() {
       }
       renderStockHoldingsTable();
     });
+  });
+
+  // 노후계산기: 월 납입액 입력 — 숫자만 남기고 콤마 포맷, Enter 또는 포커스 아웃 시 반영
+  const retireInput = $("#retireMonthlyInput");
+  const commitRetireMonthly = () => {
+    const n = Number(retireInput.value.replace(/[^0-9]/g, "")) || 0;
+    state.retirement.monthly = n;
+    localStorage.setItem("retireMonthly", String(n));
+    if (state.view === "retirement") renderRetirementPanel();
+    else renderRetirementControls();
+  };
+  retireInput.addEventListener("blur", commitRetireMonthly);
+  retireInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      commitRetireMonthly();
+      retireInput.blur();
+    }
   });
 
   if (typeof Chart === "undefined") {
@@ -926,10 +953,11 @@ function getSelectedData(sel) {
   return sel === "total" ? aggregateTotal() : state.monthly[sel] || {};
 }
 
-// state.view("budget"/"stocks")에 맞춰 #budgetView / #stockView 표시 전환
+// state.view("budget"/"stocks"/"retirement")에 맞춰 #budgetView / #stockView / #retirementView 표시 전환
 function toggleView() {
   $("#budgetView").classList.toggle("hidden", state.view !== "budget");
   $("#stockView").classList.toggle("hidden", state.view !== "stocks");
+  $("#retirementView").classList.toggle("hidden", state.view !== "retirement");
 }
 
 function renderAll() {
@@ -937,6 +965,10 @@ function renderAll() {
   toggleView();
   if (state.view === "stocks") {
     renderStockPanel();
+    return;
+  }
+  if (state.view === "retirement") {
+    renderRetirementPanel();
     return;
   }
   renderKpis(state.selectedMonth);
@@ -971,6 +1003,13 @@ function renderMonthRibbon() {
     renderStockPanel();
   };
 
+  const selectRetirement = () => {
+    state.view = "retirement";
+    toggleView();
+    renderMonthRibbon();
+    renderRetirementPanel();
+  };
+
   // 종합 타일 (1~8월 전체 합계) — 맨 앞에 고정
   const totalTile = document.createElement("div");
   totalTile.className = "month-tile" + (state.view === "budget" && state.selectedMonth === "total" ? " active" : "");
@@ -984,6 +1023,13 @@ function renderMonthRibbon() {
   stockTile.innerHTML = `<div class="m-label">증권</div>`;
   stockTile.addEventListener("click", selectStocks);
   wrap.appendChild(stockTile);
+
+  // 노후계산기 타일 — 증권 바로 옆에 고정
+  const retireTile = document.createElement("div");
+  retireTile.className = "month-tile stock-tile" + (state.view === "retirement" ? " active" : "");
+  retireTile.innerHTML = `<div class="m-label">노후계산기</div>`;
+  retireTile.addEventListener("click", selectRetirement);
+  wrap.appendChild(retireTile);
 
   CONFIG.MONTHS.forEach((m) => {
     const d = state.monthly[m] || {};
@@ -1023,6 +1069,177 @@ function renderKpis(sel) {
     </div>`
     )
     .join("");
+}
+
+// ============================================
+// 노후계산기 (월 납입액 + 수익률 → 연차별 원금/수익/총액 계산)
+// ============================================
+
+// 월 납입액을 매월 말 납입 · 매월 복리로 굴린다고 가정한 적립식 미래가치 계산
+// (구글 시트 FV(rate/12, 12*year, -월납입액) 함수와 동일한 방식)
+function calcRetirementRows(monthly, ratePercent, years) {
+  const i = ratePercent / 100 / 12;
+  const rows = [];
+  for (let y = 1; y <= years; y++) {
+    const n = y * 12;
+    const principal = monthly * n;
+    const total = i === 0 ? principal : monthly * (((1 + i) ** n - 1) / i);
+    rows.push({ year: y, principal, profit: total - principal, total });
+  }
+  return rows;
+}
+
+function renderRetirementControls() {
+  const r = state.retirement;
+
+  const monthlyInput = $("#retireMonthlyInput");
+  if (document.activeElement !== monthlyInput) {
+    monthlyInput.value = r.monthly.toLocaleString("ko-KR");
+  }
+
+  // 빠른 선택 버튼 (자주 쓰는 월 납입액)
+  const quickWrap = $("#retireQuick");
+  quickWrap.innerHTML = "";
+  [300000, 500000, 1000000, 2000000, 3000000].forEach((amt) => {
+    const btn = document.createElement("button");
+    btn.textContent = amt >= 10000 ? `${amt / 10000}만` : amt.toLocaleString("ko-KR");
+    btn.addEventListener("click", () => {
+      r.monthly = amt;
+      localStorage.setItem("retireMonthly", String(amt));
+      renderRetirementPanel();
+    });
+    quickWrap.appendChild(btn);
+  });
+
+  // 수익률 칩 (1~10%)
+  const rateWrap = $("#rateRibbon");
+  rateWrap.innerHTML = "";
+  RETIRE_RATES.forEach((rate) => {
+    const chip = document.createElement("div");
+    chip.className = "rate-chip" + (rate === r.rate ? " active" : "");
+    chip.textContent = `${rate}%`;
+    chip.addEventListener("click", () => {
+      r.rate = rate;
+      localStorage.setItem("retireRate", String(rate));
+      renderRetirementPanel();
+    });
+    rateWrap.appendChild(chip);
+  });
+
+  // 기준 연차 선택 (KPI 카드에 표시할 연차)
+  const yearSelect = $("#retireYearSelect");
+  if (!yearSelect.dataset.built) {
+    for (let y = 1; y <= RETIRE_MAX_YEARS; y++) {
+      const opt = document.createElement("option");
+      opt.value = y;
+      opt.textContent = `${y}년차`;
+      yearSelect.appendChild(opt);
+    }
+    yearSelect.dataset.built = "1";
+    yearSelect.addEventListener("change", () => {
+      r.years = Number(yearSelect.value);
+      localStorage.setItem("retireYears", String(r.years));
+      renderRetirementPanel();
+    });
+  }
+  yearSelect.value = String(r.years);
+}
+
+function renderRetirementKpis(rows) {
+  const r = state.retirement;
+  const target = rows[Math.min(r.years, rows.length) - 1];
+  const y1 = rows[0];
+
+  const cards = [
+    { label: `월 납입액`, value: r.monthly, color: "var(--accent)", sub: `연 ${r.rate}% 가정` },
+    { label: `${target.year}년차 원금`, value: target.principal, color: "var(--muted-2)", sub: `총 ${target.year * 12}개월 납입` },
+    { label: `${target.year}년차 수익`, value: target.profit, color: "var(--savings)", sub: `1년차 수익 ${maskWon(y1.profit)}` },
+    { label: `${target.year}년차 총액`, value: target.total, color: "var(--income)", sub: `원금의 ${target.principal ? (target.total / target.principal).toFixed(2) : "-"}배` },
+  ];
+
+  $("#retireKpiGrid").innerHTML = cards
+    .map(
+      (c) => `
+    <div class="kpi-card">
+      <div class="label"><span class="dot" style="background:${c.color}"></span>${c.label}</div>
+      <div class="value">${maskWon(c.value)}</div>
+      <div class="delta">${c.sub || ""}</div>
+    </div>`
+    )
+    .join("");
+}
+
+function renderRetirementChart(rows) {
+  destroyChart("retire");
+  const r = state.retirement;
+  $("#retireChartTag").textContent = `연 ${r.rate}% · ${rows.length}년`;
+
+  const labels = rows.map((row) => `${row.year}년`);
+  const principal = rows.map((row) => row.principal);
+  const profit = rows.map((row) => row.profit);
+  const totals = rows.map((row) => row.total);
+
+  state.charts.retire = new Chart($("#retireChart"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label: "원금", data: principal, backgroundColor: "#c9ced9", stack: "s", borderRadius: 3 },
+        { label: "수익", data: profit, backgroundColor: "#c08a2e", stack: "s", borderRadius: 3 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding: { top: 22 } },
+      plugins: {
+        legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: ${maskWon(ctx.raw)}`,
+            footer: (items) => {
+              const i = items[0].dataIndex;
+              return `총액: ${maskWon(totals[i])}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { stacked: true, grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", maxRotation: 0, autoSkip: true, maxTicksLimit: 15 } },
+        y: {
+          stacked: true,
+          grid: { color: "#e2e5eb" },
+          suggestedMax: Math.max(...totals, 1) * 1.12,
+          ticks: { color: "#6b7280", callback: (v) => maskShort(v) },
+        },
+      },
+    },
+  });
+}
+
+function renderRetirementTable(rows) {
+  const r = state.retirement;
+  $("#retireTableTag").textContent = `1~${rows.length}년차 · 연 ${r.rate}%`;
+  $("#retireTableBody").innerHTML = rows
+    .map(
+      (row) => `
+    <tr class="${row.year % 10 === 0 ? "milestone" : ""}">
+      <td>${row.year}년차</td>
+      <td class="principal">${maskWon(row.principal)}</td>
+      <td class="profit">+${maskWon(row.profit)}</td>
+      <td class="total">${maskWon(row.total)}</td>
+    </tr>`
+    )
+    .join("");
+}
+
+function renderRetirementPanel() {
+  renderRetirementControls();
+  const r = state.retirement;
+  const rows = calcRetirementRows(r.monthly, r.rate, RETIRE_MAX_YEARS);
+  renderRetirementKpis(rows);
+  renderRetirementChart(rows);
+  renderRetirementTable(rows);
 }
 
 function destroyChart(key) {
