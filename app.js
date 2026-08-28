@@ -15,6 +15,7 @@ const state = {
   assetPanelMonth: null, // 종합 탭에서 ◀▶ 로 넘겨보는 자산 현황 대상 월
   stockSort: { key: "value", dir: "desc" }, // 보유 종목 테이블 정렬 기준
   hideAmounts: localStorage.getItem("hideAmounts") === "1", // 금액(원금/평가금액 등) 가리기 여부 — 가계부/증권 탭 공통
+  selectedPensionAccount: "송 연금저축", // 노후계산기 탭 상단 "연금 계좌 현황" 패널에서 현재 선택된 계좌 탭
   retirement: {
     monthly: Number(localStorage.getItem("retireMonthly")) || 1000000, // 월 납입 금액
     rate: Number(localStorage.getItem("retireRate")) || 5, // 선택된 연 수익률(%) — 1~10
@@ -26,6 +27,10 @@ const state = {
 const RETIRE_RATES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 // 노후계산기 표/차트가 보여줄 최대 연차
 const RETIRE_MAX_YEARS = 30;
+
+// 노후계산기 탭 "연금 계좌 현황" 패널에서 보여줄 계좌 탭 목록
+// 증권 시트의 "계좌구분" 열 값과 정확히 일치해야 함
+const PENSION_ACCOUNTS = ["송 연금저축", "꼬 퇴직금"];
 
 // 증권 탭이 읽어올 구글 시트 탭 이름 (시트 쪽 탭 이름을 바꾸면 여기도 맞춰주세요)
 const STOCK_SHEET_NAME = "증권";
@@ -1072,20 +1077,44 @@ function renderKpis(sel) {
 }
 
 // ============================================
-// 연금저축 계좌 현황 (증권 탭 실데이터에서 계좌구분에 "연금"이 포함된 종목만 추림)
+// 연금 계좌 현황 (증권 탭 실데이터에서 "계좌구분"이 PENSION_ACCOUNTS 목록의
+// 값 중 하나와 정확히 일치하는 종목만 추림 — 노후계산기 탭 상단 "송 연금저축" / "꼬 퇴직금" 탭 전환)
 // ============================================
-function getPensionHoldings() {
+function getPensionHoldings(accountName) {
   const holdings = (state.stocks && state.stocks.holdings) || [];
-  return holdings.filter((h) => (h.account || "").includes("연금"));
+  return holdings.filter((h) => (h.account || "").trim() === accountName);
+}
+
+// 노후계산기 탭 "연금 계좌 현황" 패널 상단의 계좌 탭 버튼(송 연금저축 / 꼬 퇴직금) 렌더링
+function renderPensionTabs() {
+  const wrap = $("#pensionTabs");
+  if (!wrap) return;
+  const selected = state.selectedPensionAccount || PENSION_ACCOUNTS[0];
+  wrap.innerHTML = PENSION_ACCOUNTS.map(
+    (name) => `<div class="pension-tab${name === selected ? " active" : ""}" data-account="${name}">${name}</div>`
+  ).join("");
+  wrap.querySelectorAll(".pension-tab").forEach((tabEl) => {
+    tabEl.addEventListener("click", () => {
+      if (state.selectedPensionAccount === tabEl.dataset.account) return;
+      state.selectedPensionAccount = tabEl.dataset.account;
+      renderPensionPanel();
+    });
+  });
 }
 
 function renderPensionPanel() {
   destroyChart("pension");
-  const rows = getPensionHoldings();
+  renderPensionTabs();
+
+  const accountName = state.selectedPensionAccount || PENSION_ACCOUNTS[0];
+  const rows = getPensionHoldings(accountName);
+  const titleEl = $("#pensionTitleText");
   const tag = $("#pensionTag");
   const kpiGrid = $("#pensionKpiGrid");
   const tbody = $("#pensionTableBody");
   const chartWrap = $("#pensionChartWrap");
+
+  if (titleEl) titleEl.textContent = `${accountName} 현황`;
 
   if (!state.stocks) {
     tag.textContent = "";
@@ -1101,7 +1130,7 @@ function renderPensionPanel() {
     kpiGrid.innerHTML = "";
     tbody.innerHTML = "";
     chartWrap.style.height = "";
-    chartWrap.innerHTML = `<div class="stock-empty">증권 탭에 계좌구분이 "연금저축"인 보유 종목이 없어요.<br>증권 시트의 "계좌구분" 열 값이 연금저축 계좌는 "연금저축"으로 입력되어 있는지 확인해주세요.</div>`;
+    chartWrap.innerHTML = `<div class="stock-empty">증권 탭에 계좌구분이 "${accountName}"인 보유 종목이 없어요.<br>증권 시트의 "계좌구분" 열 값이 정확히 "${accountName}"으로 입력되어 있는지 확인해주세요.</div>`;
     return;
   }
 
