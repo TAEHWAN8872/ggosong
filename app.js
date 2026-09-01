@@ -777,21 +777,21 @@ const ASSET_SNAPSHOT_CONFIG = {
   },
   8: {
     cash: [
-      { name: "개인주식", ref: "D61" },
-      { name: "케이뱅크", ref: "D62" },
-      { name: "해외주식", ref: "D63" },
-      { name: "증권사 예수금", ref: "D64" },
+      { name: "개인주식", ref: "c61" },
+      { name: "케이뱅크", ref: "c62" },
+      { name: "해외주식", ref: "c63" },
+      { name: "증권사 예수금", ref: "c64" },
     ],
     assets: [
-      { name: "주택원금", ref: "D65" },
-      { name: "꼬 주택청약", ref: "D66" },
-      { name: "송 주택청약", ref: "D67" },
-      { name: "연금저축", ref: "D68" },
-      { name: "꼬 퇴직금", ref: "D69" },
+      { name: "주택원금", ref: "c65" },
+      { name: "꼬 주택청약", ref: "c66" },
+      { name: "송 주택청약", ref: "c67" },
+      { name: "연금저축", ref: "c68" },
+      { name: "꼬 퇴직금", ref: "c69" },
     ],
     realEstate: [
-      { name: "라포리엘", ref: "I61" },
-      { name: "반도빌리지", ref: "I62" },
+      { name: "라포리엘", ref: "h61" },
+      { name: "반도빌리지", ref: "h62" },
     ],
   },
   // 9~12월 셀 참조는 확인되는 대로 여기에 추가
@@ -831,8 +831,8 @@ const REAL_ESTATE_DETAIL_CONFIG = {
     { name: "반도빌리지", investRef: "H60", sellRef: "F60", buyRef: "G60" },
   ],
   8: [
-    { name: "라포리엘", investRef: "I61", sellRef: "G61", buyRef: "H61", profitDivisor: 2 },
-    { name: "반도빌리지", investRef: "I62", sellRef: "G62", buyRef: "H62" },
+    { name: "라포리엘", investRef: "h61", sellRef: "f61", buyRef: "g61", profitDivisor: 2 },
+    { name: "반도빌리지", investRef: "h62", sellRef: "f62", buyRef: "g62" },
   ],
   // 9~12월 셀 참조는 확인되는 대로 여기에 추가
 };
