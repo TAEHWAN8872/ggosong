@@ -4,13 +4,11 @@
 const CONFIG = {
   // 구글시트 URL의 /d/ 뒤 긴 문자열
   SPREADSHEET_ID: "1xlVqmLgoMFBAOPgwoy5vzwEWcXoVmGQ6zV2Pvw2sHuE",
-
   // Google Cloud Console > API 및 서비스 > 사용자 인증 정보에서 발급받은 "API 키"
   // (OAuth 클라이언트 ID 아님! 로그인 없이 공개 시트를 읽기 위한 API 키)
   // - "Google Sheets API"만 사용하도록 제한 권장
   // - 가능하면 "HTTP 리퍼러" 제한을 걸어서 내 도메인에서만 쓰이도록 제한 권장
   API_KEY: "AIzaSyBg0rjRqrEMsZoMTZJqQK87i1DPhlrxqw8",
-
   // 시트 탭 이름 (구글시트 하단 탭명과 정확히 일치해야 함)
   SHEET_NAMES: {
     ANNUAL: "2026년 연간 요약",
@@ -20,10 +18,8 @@ const CONFIG = {
     // 구형 포맷 (수동 작성, 1~5월)
     OLD_FORMAT: ["26년 1월", "26년 2월", "26년 3월", "26년 4월", "26년 5월"],
   },
-
   // 대시보드에서 다룰 월 범위
   MONTHS: [1, 2, 3, 4, 5, 6, 7, 8],
-
   // 각 월이 신형/구형 중 어떤 포맷인지 + 실제 시트명
   monthMeta(m) {
     if (m >= 6) {
@@ -31,7 +27,6 @@ const CONFIG = {
     }
     return { format: "old", sheetName: `26년 ${m}월` };
   },
-
   // 실제 시트 수식과 정확히 일치하는 범위 (1-indexed, 시트에 보이는 행 번호 그대로)
   // 구형(1~5월): expenseRows = 지출 SUM 범위(들), excludeRows = 범위 내 제외할 행(5월 -E42 등)
   //              savingsRows = 저축 SUM에 쓰인 두 행, savingsCols = J~N (9~13, 0-indexed)
@@ -44,6 +39,6 @@ const CONFIG = {
     5: { expenseRows: [[11, 45], [54, 75]], excludeRows: [42], savingsRows: [41, 43] },
     6: { fixedRows: [13, 31], varRows: [13, 36], savingsRows: [45, 52] },
     7: { fixedRows: [13, 31], varRows: [13, 38], savingsRows: [47, 54] },
-    8: { fixedRows: [13, 31], varRows: [13, 39], savingsRows: [48, 55] },
+    8: { fixedRows: [13, 31], varRows: [13, 39], savingsRows: [49, 56] },
   },
 };
