@@ -8,7 +8,7 @@ const state = {
   stockHistory: [],  // [{date:"2026-08-19", value, buy, pnl, rate}, ...] — 00시 마감 기준 일별 자산 스냅샷
   stockDetailHistory: {}, // { "티커또는종목명": { name, ticker, rows:[{date, value, buy, pnl, rate}, ...] } } — 종목별 일별 스냅샷
   selectedDailyTicker: null, // "종목별 일별 추이" 패널에서 현재 선택된 종목 key
-  selectedMonth: "total", // "total" = 종합(1~8월 합계), 또는 1~8 숫자(해당 월)
+  selectedMonth: "total", // "total" = 종합(1~9월 합계), 또는 1~9 숫자(해당 월)
   view: "budget",    // "budget" = 가계부 탭들, "stocks" = 증권 탭
   expandedCats: new Set(), // 지출 카테고리 목록에서 펼쳐진 항목들
   charts: {},
@@ -794,7 +794,26 @@ const ASSET_SNAPSHOT_CONFIG = {
       { name: "반도빌리지", ref: "H62" },
     ],
   },
-  // 9~12월 셀 참조는 확인되는 대로 여기에 추가
+  9: {
+    cash: [
+      { name: "개인주식", ref: "C60" },
+      { name: "케이뱅크", ref: "C61" },
+      { name: "해외주식", ref: "C62" },
+      { name: "증권사 예수금", ref: "C63" },
+    ],
+    assets: [
+      { name: "주택원금", ref: "C64" },
+      { name: "꼬 주택청약", ref: "C65" },
+      { name: "송 주택청약", ref: "C66" },
+      { name: "연금저축", ref: "C67" },
+      { name: "꼬 퇴직금", ref: "C68" },
+    ],
+    realEstate: [
+      { name: "라포리엘", ref: "H60" },
+      { name: "반도빌리지", ref: "H61" },
+    ],
+  },
+  // 10~12월 셀 참조는 확인되는 대로 여기에 추가
 };
 
 // ============================================
@@ -834,7 +853,11 @@ const REAL_ESTATE_DETAIL_CONFIG = {
     { name: "라포리엘", investRef: "H61", sellRef: "F61", buyRef: "G61", profitDivisor: 2 },
     { name: "반도빌리지", investRef: "H62", sellRef: "F62", buyRef: "G62" },
   ],
-  // 9~12월 셀 참조는 확인되는 대로 여기에 추가
+  9: [
+    { name: "라포리엘", investRef: "H60", sellRef: "F60", buyRef: "G60", profitDivisor: 2 },
+    { name: "반도빌리지", investRef: "H61", sellRef: "F61", buyRef: "G61" },
+  ],
+  // 10~12월 셀 참조는 확인되는 대로 여기에 추가
 };
 
 function parseRealEstateDetail(grid, refConfig) {
@@ -1038,7 +1061,7 @@ function renderMonthRibbon() {
     renderRetirementPanel();
   };
 
-  // 종합 타일 (1~8월 전체 합계) — 맨 앞에 고정
+  // 종합 타일 (1~9월 전체 합계) — 맨 앞에 고정
   const totalTile = document.createElement("div");
   totalTile.className = "month-tile" + (state.view === "budget" && state.selectedMonth === "total" ? " active" : "");
   totalTile.innerHTML = `<div class="m-label">종합</div>`;
@@ -1699,7 +1722,7 @@ function renderTrendChart(sel) {
 
   if (sel === "total") {
     titleEl.textContent = "월별 수입 · 지출 · 저축 추이";
-    tagEl.textContent = "2026년 1~8월";
+    tagEl.textContent = "2026년 1~9월";
     const labels = CONFIG.MONTHS.map((m) => `${m}월`);
     const income = CONFIG.MONTHS.map((m) => (state.monthly[m]?.income || 0) + getSideIncome(m));
     const expense = CONFIG.MONTHS.map((m) => state.monthly[m]?.expense || 0);

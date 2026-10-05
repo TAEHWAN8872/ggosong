@@ -13,13 +13,13 @@ const CONFIG = {
   SHEET_NAMES: {
     ANNUAL: "2026년 연간 요약",
     SIDE_BUSINESS: "26년 부업",
-    // 신형 포맷 (스크립트 생성, 6~8월)
-    NEW_FORMAT: ["2026-06", "2026-07", "2026-08"],
+    // 신형 포맷 (스크립트 생성, 6~9월)
+    NEW_FORMAT: ["2026-06", "2026-07", "2026-08", "2026-09"],
     // 구형 포맷 (수동 작성, 1~5월)
     OLD_FORMAT: ["26년 1월", "26년 2월", "26년 3월", "26년 4월", "26년 5월"],
   },
   // 대시보드에서 다룰 월 범위
-  MONTHS: [1, 2, 3, 4, 5, 6, 7, 8],
+  MONTHS: [1, 2, 3, 4, 5, 6, 7, 8, 9],
   // 각 월이 신형/구형 중 어떤 포맷인지 + 실제 시트명
   monthMeta(m) {
     if (m >= 6) {
@@ -30,7 +30,7 @@ const CONFIG = {
   // 실제 시트 수식과 정확히 일치하는 범위 (1-indexed, 시트에 보이는 행 번호 그대로)
   // 구형(1~5월): expenseRows = 지출 SUM 범위(들), excludeRows = 범위 내 제외할 행(5월 -E42 등)
   //              savingsRows = 저축 SUM에 쓰인 두 행, savingsCols = J~N (9~13, 0-indexed)
-  // 신형(6~8월): fixedRows = 고정지출 D열 범위, varRows = 변동지출 J열 범위, savingsRows = 저축 D열 범위
+  // 신형(6~9월): fixedRows = 고정지출 D열 범위, varRows = 변동지출 J열 범위, savingsRows = 저축 D열 범위
   RANGES: {
     1: { expenseRows: [[11, 86]], savingsRows: [39, 41] },
     2: { expenseRows: [[11, 87]], savingsRows: [40, 42] },
@@ -40,5 +40,6 @@ const CONFIG = {
     6: { fixedRows: [13, 31], varRows: [13, 36], savingsRows: [45, 52] },
     7: { fixedRows: [13, 31], varRows: [13, 38], savingsRows: [47, 54] },
     8: { fixedRows: [13, 31], varRows: [13, 39], savingsRows: [49, 56] },
+    9: { fixedRows: [13, 31], varRows: [13, 39], savingsRows: [48, 55] },
   },
 };
