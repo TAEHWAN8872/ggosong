@@ -139,8 +139,8 @@ function updateMaskToggleLabel() {
 // ============================================
 // Sheets API (공개 시트 + API 키, 로그인 불필요)
 // ============================================
-async function fetchGrids(sheetNames) {
-  const ranges = sheetNames.map((n) => `'${n}'!A1:AF400`).join("&ranges=");
+async function fetchGrids(sheetNames, endRange = "AF400") {
+  const ranges = sheetNames.map((n) => `'${n}'!A1:${endRange}`).join("&ranges=");
   const url =
     `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values:batchGet` +
     `?ranges=${ranges}&valueRenderOption=UNFORMATTED_VALUE&key=${CONFIG.API_KEY}`;
@@ -160,9 +160,9 @@ async function fetchGrids(sheetNames) {
 
 // 일별자산 시트처럼 "아직 없을 수도 있는" 탭을 따로 불러올 때 씀.
 // 시트가 없으면 batchGet 전체가 400 에러로 실패하므로, 메인 데이터 로드에 영향이 없도록 별도로 감싸서 실패를 무시함.
-async function fetchGridOptional(sheetName) {
+async function fetchGridOptional(sheetName, endRange) {
   try {
-    const grids = await fetchGrids([sheetName]);
+    const grids = await fetchGrids([sheetName], endRange);
     return grids[sheetName] || [];
   } catch (e) {
     return []; // 탭이 아직 없거나(스크립트 미설정) 접근 실패 → 조용히 빈 배열로 처리
@@ -914,8 +914,9 @@ async function loadAll(forceRefresh) {
   ];
   const [grids, historyGrid, detailHistoryGrid] = await Promise.all([
     fetchGrids(sheetNames),
-    fetchGridOptional(STOCK_HISTORY_SHEET_NAME),
-    fetchGridOptional(STOCK_DETAIL_HISTORY_SHEET_NAME),
+    fetchGridOptional(STOCK_HISTORY_SHEET_NAME, "E2000"),
+    // 종목별 탭은 하루에 종목 수만큼(약 36줄) 쌓이므로 400행 제한으로는 초반 며칠치만 읽힘 → 넉넉히 확장
+    fetchGridOptional(STOCK_DETAIL_HISTORY_SHEET_NAME, "G30000"),
   ]);
 
   const annual = parseAnnualSummary(grids[CONFIG.SHEET_NAMES.ANNUAL]);
@@ -950,10 +951,15 @@ async function loadAll(forceRefresh) {
   state.stocks = stocks;
   state.stockHistory = stockHistory;
   state.stockDetailHistory = stockDetailHistory;
-  sessionStorage.setItem(
-    cacheKey,
-    JSON.stringify({ monthly, side, stocks, stockHistory, stockDetailHistory, ts: Date.now() })
-  );
+  try {
+    sessionStorage.setItem(
+      cacheKey,
+      JSON.stringify({ monthly, side, stocks, stockHistory, stockDetailHistory, ts: Date.now() })
+    );
+  } catch (e) {
+    // 저장 용량 초과 등 → 캐시만 포기하고 화면은 정상 렌더링
+    console.warn("캐시 저장 실패:", e);
+  }
 
   renderAll();
   setSyncStatus("방금 동기화됨 · " + new Date().toLocaleTimeString("ko-KR"));
