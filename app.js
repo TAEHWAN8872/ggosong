@@ -8,7 +8,7 @@ const state = {
   stockHistory: [],  // [{date:"2026-08-19", value, buy, pnl, rate}, ...] — 00시 마감 기준 일별 자산 스냅샷
   stockDetailHistory: {}, // { "티커또는종목명": { name, ticker, rows:[{date, value, buy, pnl, rate}, ...] } } — 종목별 일별 스냅샷
   selectedDailyTicker: null, // "종목별 일별 추이" 패널에서 현재 선택된 종목 key
-  selectedMonth: "total", // "total" = 종합(1~9월 합계), 또는 1~9 숫자(해당 월)
+  selectedMonth: "total", // "total" = 종합(시트에 있는 모든 달 합계), 또는 월 숫자
   view: "budget",    // "budget" = 가계부 탭들, "stocks" = 증권 탭
   expandedCats: new Set(), // 지출 카테고리 목록에서 펼쳐진 항목들
   charts: {},
@@ -73,7 +73,7 @@ function initApp() {
   $("#gate").classList.add("hidden");
   $("#app").classList.remove("hidden");
   $("#refreshBtn").classList.remove("hidden");
-  $("#refreshBtn").addEventListener("click", () => loadAll(true));
+  $("#refreshBtn").addEventListener("click", () => loadAll(false));
 
   const maskToggleBtn = $("#maskToggleBtn");
   maskToggleBtn.classList.remove("hidden");
@@ -119,10 +119,18 @@ function initApp() {
     setSyncStatus("차트 라이브러리 로드 실패 (Chart.js CDN 확인 필요)");
   }
 
-  loadAll(false).catch((err) => {
+  loadAll(true).catch((err) => {
     console.error(err);
     setSyncStatus("데이터 로드 실패: " + err.message);
   });
+  startAutoRefresh();
+}
+
+// "2026년 1~11월" 처럼 현재 시트에 있는 달 범위 표시
+function monthRangeLabel() {
+  const ms = CONFIG.MONTHS;
+  if (!ms.length) return `${CONFIG.YEAR}년`;
+  return ms.length === 1 ? `${CONFIG.YEAR}년 ${ms[0]}월` : `${CONFIG.YEAR}년 ${ms[0]}~${ms[ms.length - 1]}월`;
 }
 
 function setSyncStatus(text) {
@@ -167,6 +175,130 @@ async function fetchGridOptional(sheetName, endRange) {
   } catch (e) {
     return []; // 탭이 아직 없거나(스크립트 미설정) 접근 실패 → 조용히 빈 배열로 처리
   }
+}
+
+// 시트 탭 목록을 읽어서 대시보드에 보여줄 월을 자동으로 결정.
+//   신형: "2026-10" (스크립트 생성)   구형: "26년 3월" (수동 작성)
+// 같은 달에 둘 다 있으면 신형을 우선. 시트에 "2026-12" 탭이 생기면 다음 로드부터 12월이 자동으로 추가됨.
+async function discoverMonths() {
+  const url =
+    `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}` +
+    `?fields=sheets.properties.title&key=${CONFIG.API_KEY}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`탭 목록 읽기 실패 ${res.status}`);
+  const data = await res.json();
+  const titles = (data.sheets || []).map((s) => s.properties.title.trim());
+
+  const year = CONFIG.YEAR;
+  const yy = String(year).slice(-2);
+  const newRe = new RegExp(`^${year}-(\\d{1,2})$`);
+  const oldRe = new RegExp(`^${yy}년\\s*(\\d{1,2})월$`);
+
+  const found = {};
+  titles.forEach((t) => {
+    let m = t.match(newRe);
+    if (m) {
+      found[Number(m[1])] = { format: "new", sheetName: t };
+      return;
+    }
+    m = t.match(oldRe);
+    if (m && !found[Number(m[1])]) found[Number(m[1])] = { format: "old", sheetName: t };
+  });
+
+  const months = Object.keys(found)
+    .map(Number)
+    .filter((m) => m >= 1 && m <= 12)
+    .sort((a, b) => a - b);
+  CONFIG.MONTHS = months;
+  CONFIG._monthSheets = found;
+  return months;
+}
+
+const ASSET_NAME_ALIASES = { "송 연금저축": "연금저축" };
+
+// 신형 포맷 시트의 표 위치를 라벨로 찾아냄 (행 번호 하드코딩 불필요)
+//   고정지출: "항목"+"카테고리" 헤더 다음 행 ~ A열 첫 "합 계" 직전
+//   변동지출: 같은 헤더 다음 행 ~ 카테고리 열의 "합 계" 직전
+//   저축    : "💙 저축 / 투자" 아래 "항목" 헤더 다음 행 ~ A열 "합 계" 직전
+//   자산현황: "📊 자산 현황" 아래 "항목/구분" 헤더 다음부터, A열 항목명(C열 금액) + E열 부동산명(F최저매도가/G투자가격/H실제투자금)
+// 반환 값은 시트에 보이는 행 번호(1-indexed)
+function detectNewFormatLayout(grid) {
+  const A = (r) => trimStr(cell(grid, r, 0));
+  const isTotal = (v) => typeof v === "string" && v.replace(/\s/g, "") === "합계";
+  const out = { ranges: null, asset: null, realEstate: null };
+
+  // 지출 헤더
+  let hdr = -1;
+  for (let r = 0; r < grid.length; r++) {
+    const row = grid[r] || [];
+    if (A(r) === "항목" && row.some((v) => trimStr(v) === "카테고리")) {
+      hdr = r;
+      break;
+    }
+  }
+  if (hdr < 0) return out;
+  const catCol = findColInRow(grid[hdr], "카테고리");
+
+  let fixedEnd = -1;
+  for (let r = hdr + 1; r < grid.length; r++) if (isTotal(A(r))) { fixedEnd = r; break; }
+  let varEnd = -1;
+  for (let r = hdr + 1; r < grid.length; r++) if (isTotal(cell(grid, r, catCol))) { varEnd = r; break; }
+
+  // 저축 블록
+  let savHdr = -1;
+  const savTitle = findCell(grid, (v) => typeof v === "string" && v.includes("저축") && v.includes("💙"));
+  if (savTitle) {
+    for (let r = savTitle.r + 1; r < savTitle.r + 4; r++) if (A(r) === "항목") { savHdr = r; break; }
+  }
+  let savEnd = -1;
+  if (savHdr >= 0) {
+    for (let r = savHdr + 1; r < grid.length; r++) if (isTotal(A(r))) { savEnd = r; break; }
+  }
+
+  // r(0-indexed)를 시트 행 번호로: r+1. 범위는 "다음 행 ~ 합계 직전 행"
+  out.ranges = {
+    fixedRows: fixedEnd > 0 ? [hdr + 2, fixedEnd] : null,
+    varRows: varEnd > 0 ? [hdr + 2, varEnd] : null,
+    savingsRows: savHdr >= 0 && savEnd > 0 ? [savHdr + 2, savEnd] : null,
+  };
+
+  // 자산 현황 블록
+  const assetTitle = findCell(grid, (v) => typeof v === "string" && v.includes("자산 현황"));
+  if (assetTitle) {
+    let aHdr = -1;
+    for (let r = assetTitle.r + 1; r < assetTitle.r + 4; r++) {
+      if (A(r) === "항목" && trimStr(cell(grid, r, 1)) === "구분") { aHdr = r; break; }
+    }
+    if (aHdr >= 0) {
+      const cash = [], assets = [], realEstateRefs = [], realEstateDetail = [];
+      for (let r = aHdr + 1; r < grid.length; r++) {
+        // 달마다 표기가 조금 다른 항목명은 하나로 통일 (6월 시트만 "송 연금저축"으로 적혀 있음)
+        const name = ASSET_NAME_ALIASES[A(r)] || A(r);
+        const kind = trimStr(cell(grid, r, 1));
+        if (!name || name.includes("합계") || name.replace(/\s/g, "").includes("합계")) break;
+        const ref = `C${r + 1}`;
+        if (kind === "현금") cash.push({ name, ref });
+        else if (kind === "자산") assets.push({ name, ref });
+      }
+      for (let r = aHdr + 1; r < grid.length; r++) {
+        const name = trimStr(cell(grid, r, 4)); // E열
+        if (!name) break;
+        const row = r + 1;
+        realEstateRefs.push({ name, ref: `H${row}` });
+        realEstateDetail.push({
+          name,
+          investRef: `H${row}`,
+          sellRef: `F${row}`,
+          buyRef: `G${row}`,
+          // 기존 설정 유지: 라포리엘은 공동명의라 수익을 2로 나눔
+          ...(name === "라포리엘" ? { profitDivisor: 2 } : {}),
+        });
+      }
+      out.asset = { cash, assets, realEstate: realEstateRefs };
+      out.realEstate = realEstateDetail;
+    }
+  }
+  return out;
 }
 
 // ============================================
@@ -737,83 +869,7 @@ const ASSET_SNAPSHOT_CONFIG = {
       { name: "반도빌리지", ref: "L29" },
     ],
   },
-  6: {
-    cash: [
-      { name: "개인주식", ref: "C57" },
-      { name: "케이뱅크", ref: "C58" },
-      { name: "해외주식", ref: "C59" },
-      { name: "증권사 예수금", ref: "C60" },
-    ],
-    assets: [
-      { name: "주택원금", ref: "C61" },
-      { name: "꼬 주택청약", ref: "C62" },
-      { name: "송 주택청약", ref: "C63" },
-      { name: "연금저축", ref: "C64" },
-      { name: "꼬 퇴직금", ref: "C65" },
-    ],
-    realEstate: [
-      { name: "라포리엘", ref: "H57" },
-      { name: "반도빌리지", ref: "H58" },
-    ],
-  },
-  7: {
-    cash: [
-      { name: "개인주식", ref: "C59" },
-      { name: "케이뱅크", ref: "C60" },
-      { name: "해외주식", ref: "C61" },
-      { name: "증권사 예수금", ref: "C62" },
-    ],
-    assets: [
-      { name: "주택원금", ref: "C63" },
-      { name: "꼬 주택청약", ref: "C64" },
-      { name: "송 주택청약", ref: "C65" },
-      { name: "연금저축", ref: "C66" },
-      { name: "꼬 퇴직금", ref: "C67" },
-    ],
-    realEstate: [
-      { name: "라포리엘", ref: "H59" },
-      { name: "반도빌리지", ref: "H60" },
-    ],
-  },
-  8: {
-    cash: [
-      { name: "개인주식", ref: "C61" },
-      { name: "케이뱅크", ref: "C62" },
-      { name: "해외주식", ref: "C63" },
-      { name: "증권사 예수금", ref: "C64" },
-    ],
-    assets: [
-      { name: "주택원금", ref: "C65" },
-      { name: "꼬 주택청약", ref: "C66" },
-      { name: "송 주택청약", ref: "C67" },
-      { name: "연금저축", ref: "C68" },
-      { name: "꼬 퇴직금", ref: "C69" },
-    ],
-    realEstate: [
-      { name: "라포리엘", ref: "H61" },
-      { name: "반도빌리지", ref: "H62" },
-    ],
-  },
-  9: {
-    cash: [
-      { name: "개인주식", ref: "C60" },
-      { name: "케이뱅크", ref: "C61" },
-      { name: "해외주식", ref: "C62" },
-      { name: "증권사 예수금", ref: "C63" },
-    ],
-    assets: [
-      { name: "주택원금", ref: "C64" },
-      { name: "꼬 주택청약", ref: "C65" },
-      { name: "송 주택청약", ref: "C66" },
-      { name: "연금저축", ref: "C67" },
-      { name: "꼬 퇴직금", ref: "C68" },
-    ],
-    realEstate: [
-      { name: "라포리엘", ref: "H60" },
-      { name: "반도빌리지", ref: "H61" },
-    ],
-  },
-  // 10~12월 셀 참조는 확인되는 대로 여기에 추가
+  // 6월~ 신형 포맷은 detectNewFormatLayout()이 "자산 현황" 표에서 자동으로 찾음
 };
 
 // ============================================
@@ -841,23 +897,7 @@ const REAL_ESTATE_DETAIL_CONFIG = {
     { name: "라포리엘", investRef: "L28", sellRef: "M28", buyRef: "N28", profitDivisor: 2 },
     { name: "반도빌리지", investRef: "L29", sellRef: "M29", buyRef: "N29" },
   ],
-  6: [
-    { name: "라포리엘", investRef: "H57", sellRef: "F57", buyRef: "G57", profitDivisor: 2 },
-    { name: "반도빌리지", investRef: "H58", sellRef: "F58", buyRef: "G58" },
-  ],
-  7: [
-    { name: "라포리엘", investRef: "H59", sellRef: "F59", buyRef: "G59", profitDivisor: 2 },
-    { name: "반도빌리지", investRef: "H60", sellRef: "F60", buyRef: "G60" },
-  ],
-  8: [
-    { name: "라포리엘", investRef: "H61", sellRef: "F61", buyRef: "G61", profitDivisor: 2 },
-    { name: "반도빌리지", investRef: "H62", sellRef: "F62", buyRef: "G62" },
-  ],
-  9: [
-    { name: "라포리엘", investRef: "H60", sellRef: "F60", buyRef: "G60", profitDivisor: 2 },
-    { name: "반도빌리지", investRef: "H61", sellRef: "F61", buyRef: "G61" },
-  ],
-  // 10~12월 셀 참조는 확인되는 대로 여기에 추가
+  // 6월~ 신형 포맷은 detectNewFormatLayout()이 자동으로 찾음
 };
 
 function parseRealEstateDetail(grid, refConfig) {
@@ -887,24 +927,41 @@ function parseAssetSnapshot(grid, refConfig) {
 // ============================================
 // 데이터 로드 + 집계
 // ============================================
-async function loadAll(forceRefresh) {
-  setSyncStatus("불러오는 중…");
+const CACHE_KEY = "gsheet_cache_v2";
+let loadingPromise = null;
+let lastSyncAt = 0;
 
-  const cacheKey = "gsheet_cache_v1";
-  if (!forceRefresh) {
-    const cached = sessionStorage.getItem(cacheKey);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      state.monthly = parsed.monthly;
-      state.side = parsed.side;
-      state.stocks = parsed.stocks || null;
-      state.stockHistory = parsed.stockHistory || [];
-      state.stockDetailHistory = parsed.stockDetailHistory || {};
-      renderAll();
-      setSyncStatus("캐시됨 · " + new Date(parsed.ts).toLocaleTimeString("ko-KR"));
-      return;
+// useCacheFirst=true: 캐시가 있으면 먼저 화면에 그려두고, 이어서 항상 시트에서 최신 값을 다시 읽어옴
+async function loadAll(useCacheFirst) {
+  if (useCacheFirst) {
+    try {
+      const cached = sessionStorage.getItem(CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        CONFIG.MONTHS = parsed.months || [];
+        CONFIG._monthSheets = parsed.monthSheets || {};
+        state.monthly = parsed.monthly;
+        state.side = parsed.side;
+        state.stocks = parsed.stocks || null;
+        state.stockHistory = parsed.stockHistory || [];
+        state.stockDetailHistory = parsed.stockDetailHistory || {};
+        renderAll();
+      }
+    } catch (e) {
+      console.warn("캐시 읽기 실패:", e);
     }
   }
+  // 동시에 여러 번 호출돼도 한 번만 불러옴
+  if (loadingPromise) return loadingPromise;
+  loadingPromise = fetchAndRender().finally(() => {
+    loadingPromise = null;
+  });
+  return loadingPromise;
+}
+
+async function fetchAndRender() {
+  setSyncStatus("불러오는 중…");
+  await discoverMonths();
 
   const sheetNames = [
     CONFIG.SHEET_NAMES.ANNUAL,
@@ -929,7 +986,17 @@ async function loadAll(forceRefresh) {
   for (const m of CONFIG.MONTHS) {
     const meta = CONFIG.monthMeta(m);
     const grid = grids[meta.sheetName] || [];
-    const ranges = CONFIG.RANGES[m];
+    let ranges, assetCfg, realEstateCfg;
+    if (meta.format === "new") {
+      const layout = detectNewFormatLayout(grid);
+      ranges = layout.ranges;
+      assetCfg = layout.asset;
+      realEstateCfg = layout.realEstate;
+    } else {
+      ranges = CONFIG.RANGES[m];
+      assetCfg = ASSET_SNAPSHOT_CONFIG[m];
+      realEstateCfg = REAL_ESTATE_DETAIL_CONFIG[m];
+    }
     const parsed = meta.format === "new" ? parseNewFormatMonth(grid, ranges) : parseOldFormatMonth(grid, ranges);
 
     // 연간요약 시트에 값이 있으면 그걸 우선 사용 (더 신뢰도 높음), 없으면 월 시트에서 계산한 값 사용
@@ -941,9 +1008,14 @@ async function loadAll(forceRefresh) {
       categories: parsed.categories,
       categoryDetails: parsed.categoryDetails,
       savingsCategories: parsed.savingsCategories,
-      assetSnapshot: parseAssetSnapshot(grid, ASSET_SNAPSHOT_CONFIG[m]),
-      realEstateDetail: parseRealEstateDetail(grid, REAL_ESTATE_DETAIL_CONFIG[m]),
+      assetSnapshot: parseAssetSnapshot(grid, assetCfg),
+      realEstateDetail: parseRealEstateDetail(grid, realEstateCfg),
     };
+  }
+
+  // 화면에서 선택 중이던 달이 사라졌으면 종합으로 되돌림
+  if (state.selectedMonth !== "total" && !CONFIG.MONTHS.includes(state.selectedMonth)) {
+    state.selectedMonth = "total";
   }
 
   state.monthly = monthly;
@@ -953,8 +1025,17 @@ async function loadAll(forceRefresh) {
   state.stockDetailHistory = stockDetailHistory;
   try {
     sessionStorage.setItem(
-      cacheKey,
-      JSON.stringify({ monthly, side, stocks, stockHistory, stockDetailHistory, ts: Date.now() })
+      CACHE_KEY,
+      JSON.stringify({
+        months: CONFIG.MONTHS,
+        monthSheets: CONFIG._monthSheets,
+        monthly,
+        side,
+        stocks,
+        stockHistory,
+        stockDetailHistory,
+        ts: Date.now(),
+      })
     );
   } catch (e) {
     // 저장 용량 초과 등 → 캐시만 포기하고 화면은 정상 렌더링
@@ -962,7 +1043,27 @@ async function loadAll(forceRefresh) {
   }
 
   renderAll();
-  setSyncStatus("방금 동기화됨 · " + new Date().toLocaleTimeString("ko-KR"));
+  lastSyncAt = Date.now();
+  setSyncStatus(
+    `동기화됨 · ${new Date().toLocaleTimeString("ko-KR")} · ${CONFIG.AUTO_REFRESH_MINUTES}분마다 자동 갱신`
+  );
+}
+
+// 시트 값이 바뀌면 자동 반영: 일정 간격 + 탭으로 돌아왔을 때 다시 읽기
+function startAutoRefresh() {
+  const minutes = Number(CONFIG.AUTO_REFRESH_MINUTES) || 5;
+  const refresh = () =>
+    loadAll(false).catch((err) => {
+      console.error(err);
+      setSyncStatus("자동 갱신 실패: " + err.message);
+    });
+  setInterval(() => {
+    if (document.visibilityState === "visible") refresh();
+  }, minutes * 60 * 1000);
+  document.addEventListener("visibilitychange", () => {
+    // 다른 탭에 있다가 돌아왔고, 마지막 동기화가 1분 이상 지났으면 바로 갱신
+    if (document.visibilityState === "visible" && Date.now() - lastSyncAt > 60 * 1000) refresh();
+  });
 }
 
 // ============================================
@@ -1067,7 +1168,7 @@ function renderMonthRibbon() {
     renderRetirementPanel();
   };
 
-  // 종합 타일 (1~9월 전체 합계) — 맨 앞에 고정
+  // 종합 타일 (시트에 있는 모든 달 합계) — 맨 앞에 고정
   const totalTile = document.createElement("div");
   totalTile.className = "month-tile" + (state.view === "budget" && state.selectedMonth === "total" ? " active" : "");
   totalTile.innerHTML = `<div class="m-label">종합</div>`;
@@ -1728,7 +1829,7 @@ function renderTrendChart(sel) {
 
   if (sel === "total") {
     titleEl.textContent = "월별 수입 · 지출 · 저축 추이";
-    tagEl.textContent = "2026년 1~9월";
+    tagEl.textContent = monthRangeLabel();
     const labels = CONFIG.MONTHS.map((m) => `${m}월`);
     const income = CONFIG.MONTHS.map((m) => (state.monthly[m]?.income || 0) + getSideIncome(m));
     const expense = CONFIG.MONTHS.map((m) => state.monthly[m]?.expense || 0);
