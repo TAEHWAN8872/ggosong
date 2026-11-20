@@ -129,8 +129,9 @@ function initApp() {
 // "2026년 1~11월" 처럼 현재 시트에 있는 달 범위 표시
 function monthRangeLabel() {
   const ms = CONFIG.MONTHS;
-  if (!ms.length) return `${CONFIG.YEAR}년`;
-  return ms.length === 1 ? `${CONFIG.YEAR}년 ${ms[0]}월` : `${CONFIG.YEAR}년 ${ms[0]}~${ms[ms.length - 1]}월`;
+  const y = state.year || CONFIG.YEAR || "";
+  if (!ms.length) return `${y}년`;
+  return ms.length === 1 ? `${y}년 ${ms[0]}월` : `${y}년 ${ms[0]}~${ms[ms.length - 1]}월`;
 }
 
 function setSyncStatus(text) {
@@ -177,130 +178,6 @@ async function fetchGridOptional(sheetName, endRange) {
   }
 }
 
-// 시트 탭 목록을 읽어서 대시보드에 보여줄 월을 자동으로 결정.
-//   신형: "2026-10" (스크립트 생성)   구형: "26년 3월" (수동 작성)
-// 같은 달에 둘 다 있으면 신형을 우선. 시트에 "2026-12" 탭이 생기면 다음 로드부터 12월이 자동으로 추가됨.
-async function discoverMonths() {
-  const url =
-    `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}` +
-    `?fields=sheets.properties.title&key=${CONFIG.API_KEY}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`탭 목록 읽기 실패 ${res.status}`);
-  const data = await res.json();
-  const titles = (data.sheets || []).map((s) => s.properties.title.trim());
-
-  const year = CONFIG.YEAR;
-  const yy = String(year).slice(-2);
-  const newRe = new RegExp(`^${year}-(\\d{1,2})$`);
-  const oldRe = new RegExp(`^${yy}년\\s*(\\d{1,2})월$`);
-
-  const found = {};
-  titles.forEach((t) => {
-    let m = t.match(newRe);
-    if (m) {
-      found[Number(m[1])] = { format: "new", sheetName: t };
-      return;
-    }
-    m = t.match(oldRe);
-    if (m && !found[Number(m[1])]) found[Number(m[1])] = { format: "old", sheetName: t };
-  });
-
-  const months = Object.keys(found)
-    .map(Number)
-    .filter((m) => m >= 1 && m <= 12)
-    .sort((a, b) => a - b);
-  CONFIG.MONTHS = months;
-  CONFIG._monthSheets = found;
-  return months;
-}
-
-const ASSET_NAME_ALIASES = { "송 연금저축": "연금저축" };
-
-// 신형 포맷 시트의 표 위치를 라벨로 찾아냄 (행 번호 하드코딩 불필요)
-//   고정지출: "항목"+"카테고리" 헤더 다음 행 ~ A열 첫 "합 계" 직전
-//   변동지출: 같은 헤더 다음 행 ~ 카테고리 열의 "합 계" 직전
-//   저축    : "💙 저축 / 투자" 아래 "항목" 헤더 다음 행 ~ A열 "합 계" 직전
-//   자산현황: "📊 자산 현황" 아래 "항목/구분" 헤더 다음부터, A열 항목명(C열 금액) + E열 부동산명(F최저매도가/G투자가격/H실제투자금)
-// 반환 값은 시트에 보이는 행 번호(1-indexed)
-function detectNewFormatLayout(grid) {
-  const A = (r) => trimStr(cell(grid, r, 0));
-  const isTotal = (v) => typeof v === "string" && v.replace(/\s/g, "") === "합계";
-  const out = { ranges: null, asset: null, realEstate: null };
-
-  // 지출 헤더
-  let hdr = -1;
-  for (let r = 0; r < grid.length; r++) {
-    const row = grid[r] || [];
-    if (A(r) === "항목" && row.some((v) => trimStr(v) === "카테고리")) {
-      hdr = r;
-      break;
-    }
-  }
-  if (hdr < 0) return out;
-  const catCol = findColInRow(grid[hdr], "카테고리");
-
-  let fixedEnd = -1;
-  for (let r = hdr + 1; r < grid.length; r++) if (isTotal(A(r))) { fixedEnd = r; break; }
-  let varEnd = -1;
-  for (let r = hdr + 1; r < grid.length; r++) if (isTotal(cell(grid, r, catCol))) { varEnd = r; break; }
-
-  // 저축 블록
-  let savHdr = -1;
-  const savTitle = findCell(grid, (v) => typeof v === "string" && v.includes("저축") && v.includes("💙"));
-  if (savTitle) {
-    for (let r = savTitle.r + 1; r < savTitle.r + 4; r++) if (A(r) === "항목") { savHdr = r; break; }
-  }
-  let savEnd = -1;
-  if (savHdr >= 0) {
-    for (let r = savHdr + 1; r < grid.length; r++) if (isTotal(A(r))) { savEnd = r; break; }
-  }
-
-  // r(0-indexed)를 시트 행 번호로: r+1. 범위는 "다음 행 ~ 합계 직전 행"
-  out.ranges = {
-    fixedRows: fixedEnd > 0 ? [hdr + 2, fixedEnd] : null,
-    varRows: varEnd > 0 ? [hdr + 2, varEnd] : null,
-    savingsRows: savHdr >= 0 && savEnd > 0 ? [savHdr + 2, savEnd] : null,
-  };
-
-  // 자산 현황 블록
-  const assetTitle = findCell(grid, (v) => typeof v === "string" && v.includes("자산 현황"));
-  if (assetTitle) {
-    let aHdr = -1;
-    for (let r = assetTitle.r + 1; r < assetTitle.r + 4; r++) {
-      if (A(r) === "항목" && trimStr(cell(grid, r, 1)) === "구분") { aHdr = r; break; }
-    }
-    if (aHdr >= 0) {
-      const cash = [], assets = [], realEstateRefs = [], realEstateDetail = [];
-      for (let r = aHdr + 1; r < grid.length; r++) {
-        // 달마다 표기가 조금 다른 항목명은 하나로 통일 (6월 시트만 "송 연금저축"으로 적혀 있음)
-        const name = ASSET_NAME_ALIASES[A(r)] || A(r);
-        const kind = trimStr(cell(grid, r, 1));
-        if (!name || name.includes("합계") || name.replace(/\s/g, "").includes("합계")) break;
-        const ref = `C${r + 1}`;
-        if (kind === "현금") cash.push({ name, ref });
-        else if (kind === "자산") assets.push({ name, ref });
-      }
-      for (let r = aHdr + 1; r < grid.length; r++) {
-        const name = trimStr(cell(grid, r, 4)); // E열
-        if (!name) break;
-        const row = r + 1;
-        realEstateRefs.push({ name, ref: `H${row}` });
-        realEstateDetail.push({
-          name,
-          investRef: `H${row}`,
-          sellRef: `F${row}`,
-          buyRef: `G${row}`,
-          // 기존 설정 유지: 라포리엘은 공동명의라 수익을 2로 나눔
-          ...(name === "라포리엘" ? { profitDivisor: 2 } : {}),
-        });
-      }
-      out.asset = { cash, assets, realEstate: realEstateRefs };
-      out.realEstate = realEstateDetail;
-    }
-  }
-  return out;
-}
-
 // ============================================
 // 그리드 유틸
 // ============================================
@@ -334,34 +211,6 @@ function rowIsBlank(row, cols) {
     const v = row[c];
     return v === undefined || v === "" || v === null;
   });
-}
-
-// ============================================
-// 파서 1: 연간 요약 시트
-// ============================================
-function parseAnnualSummary(grid) {
-  const header = findCell(grid, "항목");
-  if (!header) return null;
-  const headerRow = grid[header.r];
-  const monthCol = (m) => findColInRow(headerRow, `${m}월`);
-
-  const rows = { income: null, expense: null, savings: null };
-  for (let r = header.r + 1; r < header.r + 6; r++) {
-    const label = trimStr(cell(grid, r, header.c));
-    if (label === "총 수입") rows.income = r;
-    else if (label === "총 지출") rows.expense = r;
-    else if (label === "저축/투자" || label === "저축 / 투자") rows.savings = r;
-  }
-  const result = {};
-  for (const m of CONFIG.MONTHS) {
-    const c = monthCol(m);
-    result[m] = {
-      income: rows.income != null && c >= 0 ? toNum(cell(grid, rows.income, c)) : null,
-      expense: rows.expense != null && c >= 0 ? toNum(cell(grid, rows.expense, c)) : null,
-      savings: rows.savings != null && c >= 0 ? toNum(cell(grid, rows.savings, c)) : null,
-    };
-  }
-  return result;
 }
 
 // ============================================
@@ -572,362 +421,158 @@ function parseStockDetailHistory(grid) {
 }
 
 // ============================================
-// 파서 3: 신형 포맷 월 시트 (2026-06 ~ 08)
+// 파서: 가계부입력 탭 (한 줄 = 한 건)
+//   열: 연도 | 월 | 구분(수입/고정지출/변동지출/저축) | 카테고리 | 항목 | 예산 | 금액 | 메모
+//   헤더 이름으로 열 위치를 찾으므로 열 순서를 바꿔도 동작함
 // ============================================
-function parseNewFormatMonth(grid, ranges) {
-  const out = { income: 0, expense: 0, savings: 0, categories: {}, categoryDetails: {}, savingsCategories: {} };
+const KIND_ALIASES = {
+  수입: "수입",
+  고정지출: "고정지출", 고정: "고정지출",
+  변동지출: "변동지출", 변동: "변동지출", 지출: "변동지출",
+  저축: "저축", 투자: "저축", "저축/투자": "저축",
+};
 
-  // 상단 요약 블록: 총 수입 / 총 지출 / 저축 / 투자 / 잔 액
-  const sumHeader = findCell(grid, "총 수입");
-  if (sumHeader) {
-    const hRow = grid[sumHeader.r];
-    const cIncome = sumHeader.c;
-    const cExpense = findColInRow(hRow, "총 지출");
-    const cSavings = findColInRow(hRow, (v) => trimStr(v) === "저축 / 투자" || trimStr(v) === "저축/투자");
-    const valRow = sumHeader.r + 1;
-    out.income = toNum(cell(grid, valRow, cIncome));
-    if (cExpense >= 0) out.expense = toNum(cell(grid, valRow, cExpense));
-    if (cSavings >= 0) out.savings = toNum(cell(grid, valRow, cSavings));
+// 엑셀/시트 날짜 일련번호(예: 46000) → {year, month}
+function serialToYM(n) {
+  const d = new Date(Math.round((n - 25569) * 86400 * 1000));
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 };
+}
+
+// 월 칸에 "12", 12, "12월", "2026-12", 날짜 무엇을 넣어도 {year, month}로 해석
+function readYearMonth(yearVal, monthVal) {
+  let year = Number(yearVal) || null;
+  let month = null;
+  if (typeof monthVal === "number") {
+    if (monthVal > 1000) ({ year, month } = serialToYM(monthVal));
+    else month = monthVal;
+  } else if (typeof monthVal === "string") {
+    const t = monthVal.trim();
+    let m = t.match(/^(\d{4})[-./\s]+(\d{1,2})/);
+    if (m) {
+      year = Number(m[1]);
+      month = Number(m[2]);
+    } else if ((m = t.match(/^(\d{1,2})\s*월?$/))) {
+      month = Number(m[1]);
+    }
   }
+  if (!month || month < 1 || month > 12) return null;
+  return { year: year || CONFIG.YEAR || new Date().getFullYear(), month };
+}
 
-  // 고정지출 + 변동지출 헤더 위치에서 열(컬럼) 위치만 동적으로 찾음: 항목/항목/설정금액/실제금액/차이 .. 카테고리/항목/항목/금액
-  let hRowIdx = -1;
-  for (let r = 0; r < grid.length; r++) {
+function headerIndex(headerRow, names) {
+  const idx = {};
+  Object.entries(names).forEach(([key, label]) => {
+    idx[key] = (headerRow || []).findIndex((v) => trimStr(v) === label);
+  });
+  return idx;
+}
+
+function parseLedger(grid) {
+  const H = headerIndex(grid[0], {
+    year: "연도", month: "월", kind: "구분", cat: "카테고리", item: "항목", budget: "예산", amount: "금액",
+  });
+  if (H.month < 0 || H.kind < 0 || H.amount < 0) {
+    throw new Error(`'${CONFIG.SHEET_NAMES.LEDGER}' 탭 첫 줄에 연도/월/구분/카테고리/항목/예산/금액 제목이 필요해요`);
+  }
+  const out = [];
+  for (let r = 1; r < grid.length; r++) {
     const row = grid[r] || [];
-    // "항목" 헤더 셀이 A:B로 병합되어 있어 B열은 비어있음 — A열만 확인
-    if (trimStr(row[0]) === "항목" && row.some((v) => trimStr(v) === "카테고리")) {
-      hRowIdx = r;
-      break;
-    }
-  }
-  if (hRowIdx >= 0 && ranges) {
-    const row = grid[hRowIdx];
-    const leftCatCol = 0;
-    const leftItemCol = 1;
-    const leftActualCol = findColInRow(row, "실제 금액");
-    const rightCatCol = findColInRow(row, "카테고리");
-    let rightAmtCol = -1;
-    for (let c = rightCatCol; c < row.length; c++) {
-      if (trimStr(row[c]) === "금액") { rightAmtCol = c; break; }
-    }
-    let rightItemCol = -1;
-    if (rightCatCol >= 0 && rightAmtCol >= 0) {
-      for (let c = rightCatCol + 1; c < rightAmtCol; c++) {
-        if (trimStr(row[c]) === "항목") { rightItemCol = c; break; }
-      }
-    }
-
-    // 고정지출: 실제 시트 수식과 동일한 행 범위만 집계 (예: D13:D31)
-    let fixedSum = 0;
-    if (ranges.fixedRows) {
-      const [r1, r2] = ranges.fixedRows;
-      let lastCat = null;
-      for (let sheetRow = r1; sheetRow <= r2; sheetRow++) {
-        const rr = grid[sheetRow - 1] || [];
-        const rawCat = trimStr(rr[leftCatCol]);
-        if (rawCat) lastCat = rawCat;
-        const cat = rawCat || lastCat;
-        const item = trimStr(rr[leftItemCol]);
-        const amt = toNum(rr[leftActualCol]);
-        fixedSum += amt;
-        if (cat && item && amt) {
-          out.categories[cat] = (out.categories[cat] || 0) + amt;
-          if (!out.categoryDetails[cat]) out.categoryDetails[cat] = {};
-          out.categoryDetails[cat][item] = (out.categoryDetails[cat][item] || 0) + amt;
-        }
-      }
-    }
-
-    // 변동지출: 실제 시트 수식과 동일한 행 범위만 집계 (예: J13:J36)
-    // 카테고리(G열)는 병합 셀이라 첫 행에만 값이 있고 아래 행은 비어있음 → 바로 위 값으로 이어받음
-    let varSum = 0;
-    if (ranges.varRows && rightCatCol >= 0 && rightAmtCol >= 0) {
-      const [r1, r2] = ranges.varRows;
-      let lastVarCat = null;
-      for (let sheetRow = r1; sheetRow <= r2; sheetRow++) {
-        const rr = grid[sheetRow - 1] || [];
-        const rawCat = trimStr(rr[rightCatCol]);
-        if (rawCat) lastVarCat = rawCat;
-        const cat = rawCat || lastVarCat;
-        const amt = toNum(rr[rightAmtCol]);
-        varSum += amt;
-        if (cat && amt) {
-          out.categories[cat] = (out.categories[cat] || 0) + amt;
-          const item = (rightItemCol >= 0 ? trimStr(rr[rightItemCol]) : "") || cat;
-          if (!out.categoryDetails[cat]) out.categoryDetails[cat] = {};
-          out.categoryDetails[cat][item] = (out.categoryDetails[cat][item] || 0) + amt;
-        }
-      }
-    }
-
-    // 총 지출: 헤더 텍스트 인식에 기대지 않고, 실제 시트 수식(D+J열 범위 합)과 동일하게 직접 계산
-    if (ranges.fixedRows || ranges.varRows) {
-      out.expense = fixedSum + varSum;
-    }
-
-    // 저축: 별도 분류열 없이 B열(항목명)에 바로 D열(실제 금액)이 붙는 구조
-    if (ranges.savingsRows) {
-      const [r1, r2] = ranges.savingsRows;
-      let sum = 0;
-      for (let sheetRow = r1; sheetRow <= r2; sheetRow++) {
-        const rr = grid[sheetRow - 1] || [];
-        const item = trimStr(rr[leftItemCol]);
-        const amt = toNum(rr[leftActualCol]);
-        sum += amt;
-        if (item && amt) {
-          out.savingsCategories[item] = (out.savingsCategories[item] || 0) + amt;
-        }
-      }
-      if (!out.savings) out.savings = sum;
-    }
+    const ym = readYearMonth(H.year >= 0 ? row[H.year] : null, row[H.month]);
+    const kind = KIND_ALIASES[String(trimStr(row[H.kind]) || "").replace(/\s/g, "")];
+    if (!ym || !kind) continue;
+    const budget = H.budget >= 0 ? toNum(row[H.budget]) : 0;
+    const amtRaw = row[H.amount];
+    const amount = toNum(amtRaw);
+    const hasActual = isNum(amtRaw);
+    if (!budget && !amount) continue;
+    const cat = trimStr(H.cat >= 0 ? row[H.cat] : "") || "기타";
+    const item = trimStr(H.item >= 0 ? row[H.item] : "") || cat;
+    out.push({ ...ym, kind, cat, item, budget, amount, hasActual });
   }
   return out;
 }
 
-// ============================================
-// 파서 4: 구형 포맷 월 시트 (26년 1~5월)
-// ============================================
-function parseOldFormatMonth(grid, ranges) {
-  const out = { income: 0, expense: 0, savings: 0, categories: {}, categoryDetails: {}, savingsCategories: {} };
-  if (!ranges) return out;
-
-  const CAT = 1, ITEM = 2, AMT = 4; // 분류, 제목, 금액(실제) — B, C, E열
-
-  // 수입: 구형 포맷(1~5월) 공통으로 K4 셀에 월급 금액이 들어있음
-  out.income = toNum(cell(grid, 3, 10)); // 시트상 K4 (0-indexed: row 3, col 10)
-
-  // 혹시 F5가 비어있는 달이 있을 경우를 대비해 "월급" 라벨 행도 폴백으로 훑음
-  if (!out.income) {
-    for (let r = 0; r < grid.length; r++) {
-      const row = grid[r] || [];
-      if (trimStr(row[CAT]) === "월급") {
-        out.income += toNum(row[AMT]);
-      }
-    }
-  }
-
-  // 지출: 실제 시트 수식과 동일한 행 범위(들)만 집계, excludeRows는 제외
-  const excludeSet = new Set(ranges.excludeRows || []);
-  let lastCat = null;
-  (ranges.expenseRows || []).forEach(([r1, r2]) => {
-    for (let sheetRow = r1; sheetRow <= r2; sheetRow++) {
-      if (excludeSet.has(sheetRow)) continue;
-      const row = grid[sheetRow - 1] || [];
-      const rawCat = trimStr(row[CAT]);
-      if (rawCat) lastCat = rawCat;
-      const cat = rawCat || lastCat;
-      const item = trimStr(row[ITEM]);
-      const amt = toNum(row[AMT]);
-      if (!cat || !amt || cat === "월급") continue;
-      out.expense += amt;
-      out.categories[cat] = (out.categories[cat] || 0) + amt;
-      const key = item || "기타";
-      if (!out.categoryDetails[cat]) out.categoryDetails[cat] = {};
-      out.categoryDetails[cat][key] = (out.categoryDetails[cat][key] || 0) + amt;
-    }
+// 자산입력 탭: 연도 | 월 | 구분(현금/자산/부동산) | 항목 | 금액 | 최저매도가 | 매수가 | 지분율
+function parseAssetLedger(grid) {
+  const H = headerIndex(grid[0], {
+    year: "연도", month: "월", kind: "구분", item: "항목", amount: "금액", sell: "최저매도가", buy: "매수가", share: "지분율",
   });
-
-  // 저축: J~N열(9~13), 각 행마다 바로 위 행이 그 행만의 항목명 헤더 (두 그룹이 서로 다른 헤더를 가짐)
-  if (ranges.savingsRows) {
-    const SAV_COLS = [9, 10, 11, 12, 13]; // J,K,L,M,N
-    let sum = 0;
-    ranges.savingsRows.forEach((sheetRow) => {
-      const row = grid[sheetRow - 1] || [];
-      const headerRow = grid[sheetRow - 2] || []; // 바로 위 행 = 이 행만의 헤더
-      SAV_COLS.forEach((c) => {
-        const amt = toNum(row[c]);
-        sum += amt;
-        if (amt) {
-          const label = trimStr(headerRow[c]) || `항목${c}`;
-          out.savingsCategories[label] = (out.savingsCategories[label] || 0) + amt;
-        }
-      });
+  if (H.month < 0 || H.item < 0 || H.amount < 0) return [];
+  const out = [];
+  for (let r = 1; r < grid.length; r++) {
+    const row = grid[r] || [];
+    const ym = readYearMonth(H.year >= 0 ? row[H.year] : null, row[H.month]);
+    const name = trimStr(row[H.item]);
+    if (!ym || !name || !isNum(row[H.amount])) continue;
+    const kind = trimStr(H.kind >= 0 ? row[H.kind] : "") || "자산";
+    out.push({
+      ...ym,
+      kind,
+      name,
+      value: toNum(row[H.amount]),
+      sell: H.sell >= 0 ? toNum(row[H.sell]) : 0,
+      buy: H.buy >= 0 ? toNum(row[H.buy]) : 0,
+      share: H.share >= 0 && isNum(row[H.share]) ? row[H.share] : 1,
     });
-    out.savings = sum;
   }
-
   return out;
 }
 
-// ============================================
-// 파서 5: 자산 현황 스냅샷 (현금 · 자산 · 부동산)
-// 사용자가 지정한 셀 참조(예: "K18", "K17+N19+O19+P19")를 그대로 읽어옴.
-// 월마다 셀 위치가 다를 수 있어 월별로 설정을 따로 둠. 아직 정의 안 된 달은 null 처리.
-// ============================================
-function colToIdx(letter) {
-  let idx = 0;
-  for (let i = 0; i < letter.length; i++) idx = idx * 26 + (letter.charCodeAt(i) - 64);
-  return idx - 1; // 0-indexed
-}
-
-function getCellValue(grid, ref) {
-  return ref
-    .split("+")
-    .map((s) => s.trim())
-    .reduce((sum, part) => {
-      const m = part.match(/^([A-Z]+)(\d+)$/);
-      if (!m) return sum;
-      const col = colToIdx(m[1]);
-      const row = parseInt(m[2], 10) - 1;
-      return sum + toNum(cell(grid, row, col));
-    }, 0);
-}
-
-const ASSET_SNAPSHOT_CONFIG = {
-  1: {
-    cash: [
-      { name: "개인주식", ref: "O21" },
-      { name: "케이뱅크", ref: "K18" },
-      { name: "해외주식", ref: "K19" },
-      { name: "증권사 예수금", ref: "K17+N19+O19+P19" },
-    ],
-    assets: [
-      { name: "주택원금", ref: "K20" },
-      { name: "꼬 주택청약", ref: "K21" },
-      { name: "송 주택청약", ref: "K22" },
-      { name: "연금저축", ref: "K23" },
-      { name: "꼬 퇴직금", ref: "K24" },
-    ],
-    realEstate: [
-      { name: "라포리엘", ref: "L27" },
-      { name: "반도빌리지", ref: "L28" },
-    ],
-  },
-  2: {
-    cash: [
-      { name: "개인주식", ref: "O21" },
-      { name: "케이뱅크", ref: "K18" },
-      { name: "해외주식", ref: "K19" },
-      { name: "증권사 예수금", ref: "K17+N19+O19+P19" },
-    ],
-    assets: [
-      { name: "주택원금", ref: "K20" },
-      { name: "꼬 주택청약", ref: "K21" },
-      { name: "송 주택청약", ref: "K22" },
-      { name: "연금저축", ref: "K23" },
-      { name: "꼬 퇴직금", ref: "K24" },
-    ],
-    realEstate: [
-      { name: "라포리엘", ref: "L27" },
-      { name: "반도빌리지", ref: "L28" },
-    ],
-  },
-  3: {
-    cash: [
-      { name: "개인주식", ref: "O21" },
-      { name: "케이뱅크", ref: "K18" },
-      { name: "해외주식", ref: "K19" },
-      { name: "증권사 예수금", ref: "K17+N19+O19+P19" },
-    ],
-    assets: [
-      { name: "주택원금", ref: "K20" },
-      { name: "꼬 주택청약", ref: "K21" },
-      { name: "송 주택청약", ref: "K22" },
-      { name: "연금저축", ref: "K23" },
-      { name: "꼬 퇴직금", ref: "K24" },
-    ],
-    realEstate: [
-      { name: "라포리엘", ref: "L27" },
-      { name: "반도빌리지", ref: "L28" },
-    ],
-  },
-  4: {
-    cash: [
-      { name: "개인주식", ref: "K17" },
-      { name: "케이뱅크", ref: "K18" },
-      { name: "해외주식", ref: "K19" },
-      { name: "증권사 예수금", ref: "N19+P19+O19" },
-    ],
-    assets: [
-      { name: "주택원금", ref: "K21" },
-      { name: "꼬 주택청약", ref: "K22" },
-      { name: "송 주택청약", ref: "K23" },
-      { name: "연금저축", ref: "K24" },
-      { name: "꼬 퇴직금", ref: "K25" },
-    ],
-    realEstate: [
-      { name: "라포리엘", ref: "L28" },
-      { name: "반도빌리지", ref: "L29" },
-    ],
-  },
-  5: {
-    cash: [
-      { name: "개인주식", ref: "K17" },
-      { name: "케이뱅크", ref: "K18" },
-      { name: "해외주식", ref: "K19" },
-      { name: "증권사 예수금", ref: "N19+P19+O19" },
-    ],
-    assets: [
-      { name: "주택원금", ref: "K21" },
-      { name: "꼬 주택청약", ref: "K22" },
-      { name: "송 주택청약", ref: "K23" },
-      { name: "연금저축", ref: "K24" },
-      { name: "꼬 퇴직금", ref: "K25" },
-    ],
-    realEstate: [
-      { name: "라포리엘", ref: "L28" },
-      { name: "반도빌리지", ref: "L29" },
-    ],
-  },
-  // 6월~ 신형 포맷은 detectNewFormatLayout()이 "자산 현황" 표에서 자동으로 찾음
-};
-
-// ============================================
-// 파서 6: 부동산 상세 (최저 매도값 / 매수가격 / 수익 / 투자수익률)
-// 저축 카테고리 대신 보여줄 부동산별 상세 정보. 월별로 설정을 따로 둠.
-// ============================================
-const REAL_ESTATE_DETAIL_CONFIG = {
-  1: [
-    { name: "라포리엘", investRef: "L27", sellRef: "M27", buyRef: "N27", profitDivisor: 2 },
-    { name: "반도빌리지", investRef: "L28", sellRef: "M28", buyRef: "N28" },
-  ],
-  2: [
-    { name: "라포리엘", investRef: "L27", sellRef: "M27", buyRef: "N27", profitDivisor: 2 },
-    { name: "반도빌리지", investRef: "L28", sellRef: "M28", buyRef: "N28" },
-  ],
-  3: [
-    { name: "라포리엘", investRef: "L27", sellRef: "M27", buyRef: "N27", profitDivisor: 2 },
-    { name: "반도빌리지", investRef: "L28", sellRef: "M28", buyRef: "N28" },
-  ],
-  4: [
-    { name: "라포리엘", investRef: "L28", sellRef: "M28", buyRef: "N28", profitDivisor: 2 },
-    { name: "반도빌리지", investRef: "L29", sellRef: "M29", buyRef: "N29" },
-  ],
-  5: [
-    { name: "라포리엘", investRef: "L28", sellRef: "M28", buyRef: "N28", profitDivisor: 2 },
-    { name: "반도빌리지", investRef: "L29", sellRef: "M29", buyRef: "N29" },
-  ],
-  // 6월~ 신형 포맷은 detectNewFormatLayout()이 자동으로 찾음
-};
-
-function parseRealEstateDetail(grid, refConfig) {
-  if (!grid || !refConfig) return null;
-  return refConfig.map((c) => {
-    const invest = getCellValue(grid, c.investRef);
-    const sell = getCellValue(grid, c.sellRef);
-    const buy = getCellValue(grid, c.buyRef);
-    const divisor = c.profitDivisor || 1;
-    const profit = (sell - buy) / divisor;
-    const roi = invest ? (profit / invest) * 100 : null;
-    return { name: c.name, invest, sell, buy, profit, roi };
+// 해당 연도의 한 달치 데이터를 기존 화면들이 쓰는 모양으로 집계
+function buildMonth(entries, assetRows) {
+  const d = {
+    income: 0, expense: 0, savings: 0, fixed: 0, variable: 0,
+    categories: {}, categoryDetails: {}, savingsCategories: {},
+    budget: { income: 0, expense: 0, savings: 0 },
+    budgetItems: [], // 예산이 있는 항목들 — 예산 vs 실제 패널용
+    hasActual: false,
+    assetSnapshot: null, realEstateDetail: null,
+  };
+  entries.forEach((e) => {
+    if (e.hasActual) d.hasActual = true;
+    if (e.kind === "수입") {
+      d.income += e.amount;
+      d.budget.income += e.budget;
+    } else if (e.kind === "저축") {
+      d.savings += e.amount;
+      d.budget.savings += e.budget;
+      if (e.amount) d.savingsCategories[e.item] = (d.savingsCategories[e.item] || 0) + e.amount;
+    } else {
+      d.expense += e.amount;
+      d.budget.expense += e.budget;
+      if (e.kind === "고정지출") d.fixed += e.amount;
+      else d.variable += e.amount;
+      if (e.amount) {
+        d.categories[e.cat] = (d.categories[e.cat] || 0) + e.amount;
+        if (!d.categoryDetails[e.cat]) d.categoryDetails[e.cat] = {};
+        d.categoryDetails[e.cat][e.item] = (d.categoryDetails[e.cat][e.item] || 0) + e.amount;
+      }
+    }
+    if (e.budget) d.budgetItems.push({ kind: e.kind, cat: e.cat, item: e.item, budget: e.budget, amount: e.amount, hasActual: e.hasActual });
   });
-}
 
-function parseAssetSnapshot(grid, refConfig) {
-  if (!grid || !refConfig) return null;
-  const mapItems = (items) => (items || []).map((it) => ({ name: it.name, value: getCellValue(grid, it.ref) }));
-  const cash = mapItems(refConfig.cash);
-  const assets = mapItems(refConfig.assets);
-  const realEstate = mapItems(refConfig.realEstate);
-  const financial = [...cash, ...assets].reduce((s, i) => s + i.value, 0);
-  const realEstateTotal = realEstate.reduce((s, i) => s + i.value, 0);
-  return { cash, assets, realEstate, financial, realEstateTotal, netWorth: financial + realEstateTotal };
+  if (assetRows.length) {
+    const pick = (k) => assetRows.filter((a) => a.kind === k).map((a) => ({ name: a.name, value: a.value }));
+    const cash = pick("현금");
+    const assets = assetRows.filter((a) => a.kind !== "현금" && a.kind !== "부동산").map((a) => ({ name: a.name, value: a.value }));
+    const realEstate = pick("부동산");
+    const financial = [...cash, ...assets].reduce((s, i) => s + i.value, 0);
+    const realEstateTotal = realEstate.reduce((s, i) => s + i.value, 0);
+    d.assetSnapshot = { cash, assets, realEstate, financial, realEstateTotal, netWorth: financial + realEstateTotal };
+    d.realEstateDetail = assetRows
+      .filter((a) => a.kind === "부동산")
+      .map((a) => {
+        const profit = (a.sell - a.buy) * (a.share || 1);
+        return { name: a.name, invest: a.value, sell: a.sell, buy: a.buy, profit, roi: a.value ? (profit / a.value) * 100 : null };
+      });
+  }
+  return d;
 }
 
 // ============================================
 // 데이터 로드 + 집계
 // ============================================
-const CACHE_KEY = "gsheet_cache_v2";
+const CACHE_KEY = "gsheet_cache_v3";
 let loadingPromise = null;
 let lastSyncAt = 0;
 
@@ -939,7 +584,7 @@ async function loadAll(useCacheFirst) {
       if (cached) {
         const parsed = JSON.parse(cached);
         CONFIG.MONTHS = parsed.months || [];
-        CONFIG._monthSheets = parsed.monthSheets || {};
+        state.year = parsed.year;
         state.monthly = parsed.monthly;
         state.side = parsed.side;
         state.stocks = parsed.stocks || null;
@@ -961,57 +606,39 @@ async function loadAll(useCacheFirst) {
 
 async function fetchAndRender() {
   setSyncStatus("불러오는 중…");
-  await discoverMonths();
 
-  const sheetNames = [
-    CONFIG.SHEET_NAMES.ANNUAL,
-    CONFIG.SHEET_NAMES.SIDE_BUSINESS,
-    STOCK_SHEET_NAME,
-    ...CONFIG.MONTHS.map((m) => CONFIG.monthMeta(m).sheetName),
-  ];
-  const [grids, historyGrid, detailHistoryGrid] = await Promise.all([
-    fetchGrids(sheetNames),
+  const sheetNames = [CONFIG.SHEET_NAMES.LEDGER, CONFIG.SHEET_NAMES.SIDE_BUSINESS, STOCK_SHEET_NAME];
+  const [grids, assetGrid, historyGrid, detailHistoryGrid] = await Promise.all([
+    fetchGrids(sheetNames, "Z5000"),
+    fetchGridOptional(CONFIG.SHEET_NAMES.ASSETS, "Z3000"),
     fetchGridOptional(STOCK_HISTORY_SHEET_NAME, "E2000"),
     // 종목별 탭은 하루에 종목 수만큼(약 36줄) 쌓이므로 400행 제한으로는 초반 며칠치만 읽힘 → 넉넉히 확장
     fetchGridOptional(STOCK_DETAIL_HISTORY_SHEET_NAME, "G30000"),
   ]);
 
-  const annual = parseAnnualSummary(grids[CONFIG.SHEET_NAMES.ANNUAL]);
+  const ledger = parseLedger(grids[CONFIG.SHEET_NAMES.LEDGER]);
+  const assetLedger = parseAssetLedger(assetGrid);
   const side = parseSideBusiness(grids[CONFIG.SHEET_NAMES.SIDE_BUSINESS]);
   const stocks = parseStocks(grids[STOCK_SHEET_NAME]);
   const stockHistory = parseStockHistory(historyGrid);
   const stockDetailHistory = parseStockDetailHistory(detailHistoryGrid);
 
-  const monthly = {};
-  for (const m of CONFIG.MONTHS) {
-    const meta = CONFIG.monthMeta(m);
-    const grid = grids[meta.sheetName] || [];
-    let ranges, assetCfg, realEstateCfg;
-    if (meta.format === "new") {
-      const layout = detectNewFormatLayout(grid);
-      ranges = layout.ranges;
-      assetCfg = layout.asset;
-      realEstateCfg = layout.realEstate;
-    } else {
-      ranges = CONFIG.RANGES[m];
-      assetCfg = ASSET_SNAPSHOT_CONFIG[m];
-      realEstateCfg = REAL_ESTATE_DETAIL_CONFIG[m];
-    }
-    const parsed = meta.format === "new" ? parseNewFormatMonth(grid, ranges) : parseOldFormatMonth(grid, ranges);
+  // 보여줄 연도: 설정값이 있으면 그 해, 없으면 데이터가 있는 가장 최근 해
+  const years = [...new Set([...ledger, ...assetLedger].map((e) => e.year))];
+  const year = CONFIG.YEAR || (years.length ? Math.max(...years) : new Date().getFullYear());
+  state.year = year;
 
-    // 연간요약 시트에 값이 있으면 그걸 우선 사용 (더 신뢰도 높음), 없으면 월 시트에서 계산한 값 사용
-    const a = annual ? annual[m] : null;
-    monthly[m] = {
-      income: a && a.income ? a.income : parsed.income,
-      expense: a && a.expense ? a.expense : parsed.expense,
-      savings: a && a.savings ? a.savings : parsed.savings,
-      categories: parsed.categories,
-      categoryDetails: parsed.categoryDetails,
-      savingsCategories: parsed.savingsCategories,
-      assetSnapshot: parseAssetSnapshot(grid, assetCfg),
-      realEstateDetail: parseRealEstateDetail(grid, realEstateCfg),
-    };
-  }
+  // 이 해에 한 줄이라도 입력된 달만 타일로 보여줌 → 12월 줄을 적으면 12월이 자동으로 생김
+  const months = [...new Set([...ledger, ...assetLedger].filter((e) => e.year === year).map((e) => e.month))].sort((a, b) => a - b);
+  CONFIG.MONTHS = months;
+
+  const monthly = {};
+  months.forEach((m) => {
+    monthly[m] = buildMonth(
+      ledger.filter((e) => e.year === year && e.month === m),
+      assetLedger.filter((e) => e.year === year && e.month === m)
+    );
+  });
 
   // 화면에서 선택 중이던 달이 사라졌으면 종합으로 되돌림
   if (state.selectedMonth !== "total" && !CONFIG.MONTHS.includes(state.selectedMonth)) {
@@ -1028,7 +655,7 @@ async function fetchAndRender() {
       CACHE_KEY,
       JSON.stringify({
         months: CONFIG.MONTHS,
-        monthSheets: CONFIG._monthSheets,
+        year: state.year,
         monthly,
         side,
         stocks,
@@ -1073,13 +700,22 @@ function startAutoRefresh() {
 // 종합(전체 합계) 집계
 // ============================================
 function aggregateTotal() {
-  const agg = { income: 0, expense: 0, savings: 0, categories: {}, categoryDetails: {} };
+  const agg = {
+    income: 0, expense: 0, savings: 0, fixed: 0, variable: 0,
+    categories: {}, categoryDetails: {}, savingsCategories: {},
+    budget: { income: 0, expense: 0, savings: 0 },
+    budgetItems: [],
+    hasActual: false,
+  };
+  const itemMap = {};
   CONFIG.MONTHS.forEach((m) => {
     const d = state.monthly[m];
     if (!d) return;
     agg.income += d.income || 0;
     agg.expense += d.expense || 0;
     agg.savings += d.savings || 0;
+    agg.fixed += d.fixed || 0;
+    agg.variable += d.variable || 0;
     Object.entries(d.categories || {}).forEach(([k, v]) => {
       agg.categories[k] = (agg.categories[k] || 0) + v;
     });
@@ -1089,8 +725,42 @@ function aggregateTotal() {
         agg.categoryDetails[cat][item] = (agg.categoryDetails[cat][item] || 0) + amt;
       });
     });
+    Object.entries(d.savingsCategories || {}).forEach(([k, v]) => {
+      agg.savingsCategories[k] = (agg.savingsCategories[k] || 0) + v;
+    });
+    // 예산 비교는 실제 금액이 입력된 달만 합산 (진행 중인 달의 빈 예산이 섞이지 않도록)
+    if (!d.hasActual) return;
+    agg.hasActual = true;
+    ["income", "expense", "savings"].forEach((k) => (agg.budget[k] += d.budget?.[k] || 0));
+    (d.budgetItems || []).forEach((b) => {
+      const key = `${b.kind}|${b.cat}|${b.item}`;
+      if (!itemMap[key]) itemMap[key] = { ...b, budget: 0, amount: 0, hasActual: true };
+      itemMap[key].budget += b.budget;
+      itemMap[key].amount += b.amount;
+    });
   });
+  agg.budgetItems = Object.values(itemMap);
   return agg;
+}
+
+// 선택한 달의 직전 달(입력된 달 기준) 데이터 — 없으면 null
+function getPrevMonthData(sel) {
+  if (sel === "total") return null;
+  const idx = CONFIG.MONTHS.indexOf(sel);
+  if (idx <= 0) return null;
+  const prev = CONFIG.MONTHS[idx - 1];
+  return { month: prev, data: state.monthly[prev] };
+}
+
+// 지난달 대비 증감 표시. goodWhenUp=true면 늘어난 게 좋은 것(초록), false면 줄어든 게 좋은 것
+function deltaHtml(cur, prev, goodWhenUp, prevLabel) {
+  if (prev == null || !isFinite(prev)) return "";
+  const diff = cur - prev;
+  if (!diff) return `<span class="chg flat">${prevLabel} 대비 변동 없음</span>`;
+  const up = diff > 0;
+  const good = up === goodWhenUp;
+  const pct = prev ? ` (${up ? "+" : ""}${((diff / Math.abs(prev)) * 100).toFixed(0)}%)` : "";
+  return `<span class="chg ${good ? "good" : "bad"}">${up ? "▲" : "▼"} ${maskWon(Math.abs(diff))}${state.hideAmounts ? "" : pct} <em>${prevLabel} 대비</em></span>`;
 }
 
 // 선택한 범위(전체 or 특정 월)의 부업 수익 합계
@@ -1130,6 +800,8 @@ function renderAll() {
     return;
   }
   renderKpis(state.selectedMonth);
+  renderBudgetPanel(state.selectedMonth);
+  renderNetWorthChart(state.selectedMonth);
   renderTrendChart(state.selectedMonth);
   renderCatChart(state.selectedMonth);
   renderSideChart(state.selectedMonth);
@@ -1147,6 +819,8 @@ function renderMonthRibbon() {
     toggleView();
     renderMonthRibbon();
     renderKpis(sel);
+    renderBudgetPanel(sel);
+    renderNetWorthChart(sel);
     renderCatChart(sel);
     renderTrendChart(sel);
     renderSideChart(sel);
@@ -1210,23 +884,186 @@ function renderKpis(sel) {
   const savings = d.savings || 0;
   const rate = income ? ((savings / income) * 100).toFixed(1) : "0.0";
 
+  const inProgress = sel !== "total" && !d.hasActual;
+  // 아직 실제 금액이 없는 달은 지난달 비교가 의미 없으므로 생략
+  const p = inProgress ? null : getPrevMonthData(sel);
+  const pd = p?.data;
+  const pl = p ? `${p.month}월` : "";
+  const pIncome = pd ? (pd.income || 0) + getSideIncome(p.month) : null;
+
   const cards = [
-    { label: "총 수입", value: income, color: "var(--income)", sub: `월급 ${maskWon(d.income || 0)} + 부업 ${maskWon(sideIncome)}` },
-    { label: "총 지출", value: expense, color: "var(--expense)" },
-    { label: "저축/투자", value: savings, color: "var(--savings)", sub: `저축률 ${state.hideAmounts ? "••" : rate}%` },
-    { label: "부업 수익", value: sideIncome, color: "var(--accent)" },
+    {
+      label: "총 수입", value: income, color: "var(--income)",
+      sub: `월급 ${maskWon(d.income || 0)} + 부업 ${maskWon(sideIncome)}`,
+      chg: pd ? deltaHtml(income, pIncome, true, pl) : "",
+    },
+    {
+      label: "총 지출", value: expense, color: "var(--expense)",
+      sub: `고정 ${maskWon(d.fixed || 0)} · 변동 ${maskWon(d.variable || 0)}`,
+      chg: pd ? deltaHtml(expense, pd.expense || 0, false, pl) : "",
+    },
+    {
+      label: "저축/투자", value: savings, color: "var(--savings)",
+      sub: `저축률 ${state.hideAmounts ? "••" : rate}%`,
+      chg: pd ? deltaHtml(savings, pd.savings || 0, true, pl) : "",
+    },
+    { label: "부업 수익", value: sideIncome, color: "var(--accent)", chg: pd ? deltaHtml(sideIncome, getSideIncome(p.month), true, pl) : "" },
   ];
 
   $("#kpiGrid").innerHTML = cards
     .map(
-      (c) => `
+      (c, idx) => `
     <div class="kpi-card">
-      <div class="label"><span class="dot" style="background:${c.color}"></span>${label} ${c.label}</div>
+      <div class="label"><span class="dot" style="background:${c.color}"></span>${label} ${c.label}${inProgress && idx === 0 ? ' <span class="pill">입력 전</span>' : ""}</div>
       <div class="value">${maskWon(c.value)}</div>
       <div class="delta">${c.sub || ""}</div>
+      ${c.chg ? `<div class="delta">${c.chg}</div>` : ""}
     </div>`
     )
     .join("");
+}
+
+// ============================================
+// 예산 대비 실제 — 가계부입력 탭의 "예산" 칸이 있는 항목만
+// ============================================
+function renderBudgetPanel(sel) {
+  const d = getSelectedData(sel);
+  const label = sel === "total" ? "종합" : `${sel}월`;
+  $("#budgetTitle").textContent = `${label} 예산 대비 실제`;
+  const items = (d.budgetItems || []).slice();
+
+  if (!items.length) {
+    $("#budgetTag").textContent = "예산 없음";
+    $("#budgetSummary").innerHTML = "";
+    $("#budgetList").innerHTML = `<div class="cat-item-empty" style="padding:12px 2px;">가계부입력 탭의 "예산" 칸을 채우면 여기서 계획 대비 실적을 볼 수 있어요.</div>`;
+    return;
+  }
+
+  // 지출 예산이 있는 항목의 실제 합 기준 진행률
+  const expItems = items.filter((i) => i.kind === "고정지출" || i.kind === "변동지출");
+  const expBudget = expItems.reduce((s, i) => s + i.budget, 0);
+  const expActual = expItems.reduce((s, i) => s + i.amount, 0);
+  const entered = items.filter((i) => i.hasActual).length;
+  $("#budgetTag").textContent =
+    sel !== "total" && entered < items.length ? `입력 ${entered}/${items.length}개` : sel === "total" ? "실제 금액 입력된 달 기준" : "전 항목 입력 완료";
+
+  const sumRow = (name, actual, budget, kind) => {
+    if (!budget) return "";
+    const pct = (actual / budget) * 100;
+    const over = kind === "expense" ? pct > 100 : pct < 100;
+    return `
+      <div class="budget-sum">
+        <div class="bs-top"><span>${name}</span><span><b>${maskWon(actual)}</b> / ${maskWon(budget)}</span></div>
+        <div class="bar-track"><div class="bar-fill ${kind}" style="width:${Math.min(pct, 100)}%"></div>${pct > 100 ? `<div class="bar-over" style="width:${Math.min(pct - 100, 100)}%"></div>` : ""}</div>
+        <div class="bs-pct ${over ? "bad" : "good"}">${state.hideAmounts ? "" : pct.toFixed(0) + "%"}</div>
+      </div>`;
+  };
+  // 예산이 잡힌 항목끼리만 비교 (예산 없이 들어온 돈/지출은 제외해 비율이 왜곡되지 않게)
+  const sumOf = (kind, key) => items.filter((i) => i.kind === kind).reduce((s, i) => s + i[key], 0);
+  $("#budgetSummary").innerHTML =
+    sumRow("수입", sumOf("수입", "amount"), sumOf("수입", "budget"), "income") +
+    sumRow("지출 (예산 잡힌 항목)", expActual, expBudget, "expense") +
+    sumRow("저축", sumOf("저축", "amount"), sumOf("저축", "budget"), "savings");
+
+  // 예산을 많이 넘긴 항목부터 → 미입력 항목은 맨 뒤
+  items.sort((a, b) => {
+    if (a.hasActual !== b.hasActual) return a.hasActual ? -1 : 1;
+    const da = a.kind === "수입" || a.kind === "저축" ? a.budget - a.amount : a.amount - a.budget;
+    const db = b.kind === "수입" || b.kind === "저축" ? b.budget - b.amount : b.amount - b.budget;
+    return db - da;
+  });
+
+  $("#budgetList").innerHTML = items
+    .map((i) => {
+      const isExp = i.kind === "고정지출" || i.kind === "변동지출";
+      const pct = i.budget ? (i.amount / i.budget) * 100 : 0;
+      const diff = i.amount - i.budget;
+      let badge;
+      if (!i.hasActual) badge = `<span class="bd flat">미입력</span>`;
+      else if (!diff) badge = `<span class="bd flat">예산대로</span>`;
+      else if (isExp) badge = diff > 0 ? `<span class="bd bad">+${maskShort(diff)} 초과</span>` : `<span class="bd good">${maskShort(-diff)} 절약</span>`;
+      else badge = diff > 0 ? `<span class="bd good">+${maskShort(diff)}</span>` : `<span class="bd bad">${maskShort(diff)}</span>`;
+      const cls = isExp ? (pct > 100 ? "expense" : "ok") : i.kind === "수입" ? "income" : "savings";
+      return `
+      <div class="budget-row">
+        <div class="name" title="${i.cat} · ${i.item}"><small>${i.kind === "수입" || i.kind === "저축" ? i.kind : i.cat}</small>${i.item}</div>
+        <div class="bar-track"><div class="bar-fill ${cls}" style="width:${Math.min(pct, 100)}%"></div></div>
+        <div class="amt">${maskShort(i.amount)}<span> / ${maskShort(i.budget)}</span></div>
+        ${badge}
+      </div>`;
+    })
+    .join("");
+}
+
+// ============================================
+// 순자산 추이 — 자산입력 탭의 월별 합계
+// ============================================
+function renderNetWorthChart(sel) {
+  destroyChart("netWorth");
+  const months = CONFIG.MONTHS.filter((m) => state.monthly[m]?.assetSnapshot);
+  const tag = $("#netWorthTag");
+  if (!months.length) {
+    tag.textContent = "자산입력 탭 데이터 없음";
+    return;
+  }
+  const nw = months.map((m) => state.monthly[m].assetSnapshot.netWorth);
+  const fin = months.map((m) => state.monthly[m].assetSnapshot.financial);
+  const first = nw[0], last = nw[nw.length - 1];
+  const diff = last - first;
+  tag.textContent = state.hideAmounts
+    ? `${months[0]}월 → ${months[months.length - 1]}월`
+    : `${months[0]}월 → ${months[months.length - 1]}월 ${diff >= 0 ? "+" : "-"}${fmtShort(Math.abs(diff))} (${first ? ((diff / first) * 100).toFixed(1) : 0}%)`;
+
+  const selIdx = months.indexOf(sel);
+  const pointR = months.map((_, i) => (i === selIdx ? 7 : 3));
+  state.charts.netWorth = new Chart($("#netWorthChart"), {
+    type: "line",
+    data: {
+      labels: months.map((m) => `${m}월`),
+      datasets: [
+        {
+          label: "순자산",
+          data: nw,
+          borderColor: "#2f9d6f",
+          backgroundColor: "rgba(47,157,111,0.12)",
+          fill: true,
+          tension: 0.3,
+          pointRadius: pointR,
+          pointBackgroundColor: "#2f9d6f",
+        },
+        {
+          label: "금융자산",
+          data: fin,
+          borderColor: "#4a6cc0",
+          backgroundColor: "#4a6cc0",
+          borderDash: [4, 4],
+          tension: 0.3,
+          pointRadius: pointR.map((r) => r - 1),
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: "#6b7280", font: chartDefaults.font, usePointStyle: true } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const i = ctx.dataIndex;
+              const prev = i > 0 ? ctx.dataset.data[i - 1] : null;
+              const chg = prev != null && !state.hideAmounts ? ` (${ctx.raw - prev >= 0 ? "+" : "-"}${fmtShort(Math.abs(ctx.raw - prev))})` : "";
+              return `${ctx.dataset.label}: ${maskWon(ctx.raw)}${chg}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: "#6b7280" } },
+        y: { grid: { color: "#e2e5eb" }, ticks: { color: "#6b7280", callback: (v) => maskShort(v) } },
+      },
+    },
+  });
 }
 
 // ============================================
@@ -1404,7 +1241,7 @@ function renderPensionFromStocks(accountName) {
     sorted.map((h) => rowHtml(h.name, h.buy, h.value)).join("") + rowHtml("합계", totalBuy, totalValue, "milestone");
 }
 
-// "꼬 퇴직금" 탭: 증권 데이터가 아니라 가계부 탭의 월별 자산 스냅샷(ASSET_SNAPSHOT_CONFIG)에서
+// "꼬 퇴직금" 탭: 증권 데이터가 아니라 가계부 탭의 월별 자산 스냅샷(자산입력 탭)에서
 // "꼬 퇴직금" 항목 금액을 월별로 모아 추이/증감을 보여준다.
 function renderPensionFromBudget(accountName) {
   const tag = $("#pensionTag");
@@ -1426,7 +1263,7 @@ function renderPensionFromBudget(accountName) {
     kpiGrid.innerHTML = "";
     tbody.innerHTML = "";
     chartWrap.style.height = "";
-    chartWrap.innerHTML = `<div class="stock-empty">가계부 탭에 "${accountName}" 자산 스냅샷 데이터가 아직 없어요.<br>월별 시트의 해당 셀 참조(ASSET_SNAPSHOT_CONFIG)가 채워져 있는지 확인해주세요.</div>`;
+    chartWrap.innerHTML = `<div class="stock-empty">가계부 탭에 "${accountName}" 자산 스냅샷 데이터가 아직 없어요.<br>자산입력 탭에 해당 항목이 입력돼 있는지 확인해주세요.</div>`;
     return;
   }
 
@@ -2112,6 +1949,7 @@ function renderRateChart(sel) {
     const labels = CONFIG.MONTHS.map((m) => `${m}월`);
     const rates = CONFIG.MONTHS.map((m) => {
       const d = state.monthly[m] || {};
+      if (!d.hasActual) return null; // 아직 입력 전인 달은 0%로 떨어뜨리지 않고 비워둠
       const income = (d.income || 0) + getSideIncome(m);
       return income ? Number(((d.savings / income) * 100).toFixed(1)) : 0;
     });
