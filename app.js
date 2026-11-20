@@ -214,8 +214,6 @@ function rowIsBlank(row, cols) {
 }
 
 // ============================================
-// 파서 2: 부업 시트 (26년 요약 블록만 사용)
-// ============================================
 function parseSideBusiness(grid) {
   const yearCell = findCell(grid, "26년");
   const categories = { 해외주식: Array(13).fill(0), 공모주: Array(13).fill(0), 구매대행: Array(13).fill(0), 카테크: Array(13).fill(0) };
@@ -430,7 +428,13 @@ const KIND_ALIASES = {
   고정지출: "고정지출", 고정: "고정지출",
   변동지출: "변동지출", 변동: "변동지출", 지출: "변동지출",
   저축: "저축", 투자: "저축", "저축/투자": "저축",
+  부업: "부업",
 };
+
+// 부업 줄인지: 구분이 "부업"이거나, 구분 "수입" + 카테고리 "부업"
+const isSideEntry = (e) => e.kind === "부업" || (e.kind === "수입" && e.cat === "부업");
+// 부업 그래프에 고정으로 보여주는 항목 (다른 이름도 합계에는 포함됨)
+const SIDE_KEYS = ["구매대행", "해외주식", "공모주", "카테크"];
 
 // 엑셀/시트 날짜 일련번호(예: 46000) → {year, month}
 function serialToYM(n) {
@@ -529,6 +533,7 @@ function buildMonth(entries, assetRows) {
     assetSnapshot: null, realEstateDetail: null,
   };
   entries.forEach((e) => {
+    if (isSideEntry(e)) return; // 부업은 state.side로 따로 집계
     if (e.hasActual) d.hasActual = true;
     if (e.kind === "수입") {
       d.income += e.amount;
@@ -607,7 +612,7 @@ async function loadAll(useCacheFirst) {
 async function fetchAndRender() {
   setSyncStatus("불러오는 중…");
 
-  const sheetNames = [CONFIG.SHEET_NAMES.LEDGER, CONFIG.SHEET_NAMES.SIDE_BUSINESS, STOCK_SHEET_NAME];
+  const sheetNames = [CONFIG.SHEET_NAMES.LEDGER, STOCK_SHEET_NAME];
   const [grids, assetGrid, historyGrid, detailHistoryGrid] = await Promise.all([
     fetchGrids(sheetNames, "Z5000"),
     fetchGridOptional(CONFIG.SHEET_NAMES.ASSETS, "Z3000"),
@@ -618,7 +623,6 @@ async function fetchAndRender() {
 
   const ledger = parseLedger(grids[CONFIG.SHEET_NAMES.LEDGER]);
   const assetLedger = parseAssetLedger(assetGrid);
-  const side = parseSideBusiness(grids[CONFIG.SHEET_NAMES.SIDE_BUSINESS]);
   const stocks = parseStocks(grids[STOCK_SHEET_NAME]);
   const stockHistory = parseStockHistory(historyGrid);
   const stockDetailHistory = parseStockDetailHistory(detailHistoryGrid);
@@ -631,6 +635,17 @@ async function fetchAndRender() {
   // 이 해에 한 줄이라도 입력된 달만 타일로 보여줌 → 12월 줄을 적으면 12월이 자동으로 생김
   const months = [...new Set([...ledger, ...assetLedger].filter((e) => e.year === year).map((e) => e.month))].sort((a, b) => a - b);
   CONFIG.MONTHS = months;
+
+  // 부업: { 구매대행: [0, 1월, 2월, ...], 공모주: [...], ... } — 기존 부업 그래프가 쓰는 모양
+  const side = {};
+  SIDE_KEYS.forEach((k) => (side[k] = Array(13).fill(0)));
+  ledger
+    .filter((e) => e.year === year && isSideEntry(e))
+    .forEach((e) => {
+      const k = SIDE_KEYS.find((x) => e.item.startsWith(x)) || e.item; // "구매대행 순수익" → 구매대행
+      if (!side[k]) side[k] = Array(13).fill(0);
+      side[k][e.month] += e.amount;
+    });
 
   const monthly = {};
   months.forEach((m) => {
