@@ -815,7 +815,6 @@ function renderAll() {
     return;
   }
   renderKpis(state.selectedMonth);
-  renderBudgetPanel(state.selectedMonth);
   renderNetWorthChart(state.selectedMonth);
   renderTrendChart(state.selectedMonth);
   renderCatChart(state.selectedMonth);
@@ -834,7 +833,6 @@ function renderMonthRibbon() {
     toggleView();
     renderMonthRibbon();
     renderKpis(sel);
-    renderBudgetPanel(sel);
     renderNetWorthChart(sel);
     renderCatChart(sel);
     renderTrendChart(sel);
@@ -935,78 +933,6 @@ function renderKpis(sel) {
       ${c.chg ? `<div class="delta">${c.chg}</div>` : ""}
     </div>`
     )
-    .join("");
-}
-
-// ============================================
-// 예산 대비 실제 — 가계부입력 탭의 "예산" 칸이 있는 항목만
-// ============================================
-function renderBudgetPanel(sel) {
-  const d = getSelectedData(sel);
-  const label = sel === "total" ? "종합" : `${sel}월`;
-  $("#budgetTitle").textContent = `${label} 예산 대비 실제`;
-  const items = (d.budgetItems || []).slice();
-
-  if (!items.length) {
-    $("#budgetTag").textContent = "예산 없음";
-    $("#budgetSummary").innerHTML = "";
-    $("#budgetList").innerHTML = `<div class="cat-item-empty" style="padding:12px 2px;">가계부입력 탭의 "예산" 칸을 채우면 여기서 계획 대비 실적을 볼 수 있어요.</div>`;
-    return;
-  }
-
-  // 지출 예산이 있는 항목의 실제 합 기준 진행률
-  const expItems = items.filter((i) => i.kind === "고정지출" || i.kind === "변동지출");
-  const expBudget = expItems.reduce((s, i) => s + i.budget, 0);
-  const expActual = expItems.reduce((s, i) => s + i.amount, 0);
-  const entered = items.filter((i) => i.hasActual).length;
-  $("#budgetTag").textContent =
-    sel !== "total" && entered < items.length ? `입력 ${entered}/${items.length}개` : sel === "total" ? "실제 금액 입력된 달 기준" : "전 항목 입력 완료";
-
-  const sumRow = (name, actual, budget, kind) => {
-    if (!budget) return "";
-    const pct = (actual / budget) * 100;
-    const over = kind === "expense" ? pct > 100 : pct < 100;
-    return `
-      <div class="budget-sum">
-        <div class="bs-top"><span>${name}</span><span><b>${maskWon(actual)}</b> / ${maskWon(budget)}</span></div>
-        <div class="bar-track"><div class="bar-fill ${kind}" style="width:${Math.min(pct, 100)}%"></div>${pct > 100 ? `<div class="bar-over" style="width:${Math.min(pct - 100, 100)}%"></div>` : ""}</div>
-        <div class="bs-pct ${over ? "bad" : "good"}">${state.hideAmounts ? "" : pct.toFixed(0) + "%"}</div>
-      </div>`;
-  };
-  // 예산이 잡힌 항목끼리만 비교 (예산 없이 들어온 돈/지출은 제외해 비율이 왜곡되지 않게)
-  const sumOf = (kind, key) => items.filter((i) => i.kind === kind).reduce((s, i) => s + i[key], 0);
-  $("#budgetSummary").innerHTML =
-    sumRow("수입", sumOf("수입", "amount"), sumOf("수입", "budget"), "income") +
-    sumRow("지출 (예산 잡힌 항목)", expActual, expBudget, "expense") +
-    sumRow("저축", sumOf("저축", "amount"), sumOf("저축", "budget"), "savings");
-
-  // 예산을 많이 넘긴 항목부터 → 미입력 항목은 맨 뒤
-  items.sort((a, b) => {
-    if (a.hasActual !== b.hasActual) return a.hasActual ? -1 : 1;
-    const da = a.kind === "수입" || a.kind === "저축" ? a.budget - a.amount : a.amount - a.budget;
-    const db = b.kind === "수입" || b.kind === "저축" ? b.budget - b.amount : b.amount - b.budget;
-    return db - da;
-  });
-
-  $("#budgetList").innerHTML = items
-    .map((i) => {
-      const isExp = i.kind === "고정지출" || i.kind === "변동지출";
-      const pct = i.budget ? (i.amount / i.budget) * 100 : 0;
-      const diff = i.amount - i.budget;
-      let badge;
-      if (!i.hasActual) badge = `<span class="bd flat">미입력</span>`;
-      else if (!diff) badge = `<span class="bd flat">예산대로</span>`;
-      else if (isExp) badge = diff > 0 ? `<span class="bd bad">+${maskShort(diff)} 초과</span>` : `<span class="bd good">${maskShort(-diff)} 절약</span>`;
-      else badge = diff > 0 ? `<span class="bd good">+${maskShort(diff)}</span>` : `<span class="bd bad">${maskShort(diff)}</span>`;
-      const cls = isExp ? (pct > 100 ? "expense" : "ok") : i.kind === "수입" ? "income" : "savings";
-      return `
-      <div class="budget-row">
-        <div class="name" title="${i.cat} · ${i.item}"><small>${i.kind === "수입" || i.kind === "저축" ? i.kind : i.cat}</small>${i.item}</div>
-        <div class="bar-track"><div class="bar-fill ${cls}" style="width:${Math.min(pct, 100)}%"></div></div>
-        <div class="amt">${maskShort(i.amount)}<span> / ${maskShort(i.budget)}</span></div>
-        ${badge}
-      </div>`;
-    })
     .join("");
 }
 
