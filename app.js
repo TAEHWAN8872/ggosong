@@ -429,6 +429,7 @@ const KIND_ALIASES = {
   변동지출: "변동지출", 변동: "변동지출", 지출: "변동지출",
   저축: "저축", 투자: "저축", "저축/투자": "저축",
   부업: "부업",
+  절약: "절약", 체험단: "절약",
 };
 
 // 부업 줄인지: 구분이 "부업"이거나, 구분 "수입" + 카테고리 "부업"
@@ -473,7 +474,7 @@ function headerIndex(headerRow, names) {
 
 function parseLedger(grid) {
   const H = headerIndex(grid[0], {
-    year: "연도", month: "월", kind: "구분", cat: "카테고리", item: "항목", budget: "예산", amount: "금액",
+    year: "연도", month: "월", kind: "구분", cat: "카테고리", item: "항목", budget: "예산", amount: "금액", memo: "메모",
   });
   if (H.month < 0 || H.kind < 0 || H.amount < 0) {
     throw new Error(`'${CONFIG.SHEET_NAMES.LEDGER}' 탭 첫 줄에 연도/월/구분/카테고리/항목/예산/금액 제목이 필요해요`);
@@ -491,7 +492,8 @@ function parseLedger(grid) {
     if (!budget && !amount) continue;
     const cat = trimStr(H.cat >= 0 ? row[H.cat] : "") || "기타";
     const item = trimStr(H.item >= 0 ? row[H.item] : "") || cat;
-    out.push({ ...ym, kind, cat, item, budget, amount, hasActual });
+    const memo = H.memo >= 0 ? trimStr(row[H.memo]) || "" : "";
+    out.push({ ...ym, kind, cat, item, budget, amount, hasActual, memo });
   }
   return out;
 }
@@ -531,9 +533,15 @@ function buildMonth(entries, assetRows) {
     budgetItems: [], // 예산이 있는 항목들 — 예산 vs 실제 패널용
     hasActual: false,
     assetSnapshot: null, realEstateDetail: null,
+    saved: 0, savedItems: [], // 체험단 등 "돈을 안 쓰고 아낀 금액" — 수입·지출·저축 합계에는 안 들어감
   };
   entries.forEach((e) => {
     if (isSideEntry(e)) return; // 부업은 state.side로 따로 집계
+    if (e.kind === "절약") {
+      d.saved += e.amount;
+      d.savedItems.push({ cat: e.cat, item: e.item, amount: e.amount, memo: e.memo || "" });
+      return;
+    }
     if (e.hasActual) d.hasActual = true;
     if (e.kind === "수입") {
       d.income += e.amount;
@@ -820,6 +828,7 @@ function renderAll() {
   renderCatChart(state.selectedMonth);
   renderSideChart(state.selectedMonth);
   renderRateChart(state.selectedMonth);
+  renderSavedPanel(state.selectedMonth);
   renderAssetPanel(state.selectedMonth);
 }
 
@@ -838,6 +847,7 @@ function renderMonthRibbon() {
     renderTrendChart(sel);
     renderSideChart(sel);
     renderRateChart(sel);
+    renderSavedPanel(sel);
     renderAssetPanel(sel);
   };
 
@@ -934,6 +944,66 @@ function renderKpis(sel) {
     </div>`
     )
     .join("");
+}
+
+// ============================================
+// 체험단 절약 — 가계부입력 탭에서 구분 "절약"인 줄
+// ============================================
+function renderSavedPanel(sel) {
+  destroyChart("saved");
+  const months = CONFIG.MONTHS;
+  const vals = months.map((m) => state.monthly[m]?.saved || 0);
+  const total = vals.reduce((a, b) => a + b, 0);
+  const isTotal = sel === "total";
+  const cur = isTotal ? total : state.monthly[sel]?.saved || 0;
+  const count = isTotal
+    ? months.reduce((n, m) => n + (state.monthly[m]?.savedItems?.length || 0), 0)
+    : state.monthly[sel]?.savedItems?.length || 0;
+
+  $("#savedTitle").textContent = isTotal ? "체험단 절약" : `${sel}월 체험단 절약`;
+  $("#savedTag").textContent = `${count}건 · ${maskWon(cur)}`;
+
+  state.charts.saved = new Chart($("#savedChart"), {
+    type: "bar",
+    data: {
+      labels: months.map((m) => `${m}월`),
+      datasets: [
+        {
+          label: "절약 금액",
+          data: vals,
+          backgroundColor: months.map((m) => (isTotal || m === sel ? "#e07a3f" : "rgba(224,122,63,0.3)")),
+          borderRadius: 4,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => maskWon(ctx.raw) } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: "#6b7280" } },
+        y: { grid: { color: "#e2e5eb" }, beginAtZero: true, ticks: { color: "#6b7280", maxTicksLimit: 5, callback: (v) => maskShort(v) } },
+      },
+    },
+  });
+
+  // 내역: 월 선택 시 그 달, 종합이면 전체 (금액 큰 순)
+  const list = [];
+  (isTotal ? months : [sel]).forEach((m) =>
+    (state.monthly[m]?.savedItems || []).forEach((i) => list.push({ ...i, month: m }))
+  );
+  list.sort((a, b) => b.amount - a.amount);
+  $("#savedList").innerHTML = list.length
+    ? list
+        .map(
+          (i) => `
+      <div class="saved-row">
+        <div class="name"><small>${isTotal ? `${i.month}월 · ` : ""}${i.cat}</small>${i.item}${i.memo ? ` <em>${i.memo}</em>` : ""}</div>
+        <div class="amt">${maskWon(i.amount)}</div>
+      </div>`
+        )
+        .join("")
+    : `<div class="cat-item-empty" style="padding:12px 2px;">가계부입력 탭에 구분 "절약"으로 적으면 여기에 모여요.<br>예) 2026 | 11 | 절약 | 체험단 | ○○식당 | (예산 비움) | 45000</div>`;
 }
 
 // ============================================

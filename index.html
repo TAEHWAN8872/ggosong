@@ -309,6 +309,15 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
 @media (max-width:520px){
   #assetPanel .asset-summary{grid-template-columns:1fr;}
 }
+
+/* 체험단 절약 */
+.saved-list{max-height:260px; overflow-y:auto;}
+.saved-row{display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:12px; padding:7px 2px; border-bottom:1px solid var(--border);}
+.saved-row:last-child{border-bottom:none;}
+.saved-row .name{font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.saved-row .name small{display:block; font-size:10px; font-weight:500; color:var(--muted-2);}
+.saved-row .name em{font-style:normal; font-weight:500; color:var(--muted-2); margin-left:4px;}
+.saved-row .amt{font-weight:700; color:#e07a3f; flex-shrink:0;}
 </style>
 </head>
 <body>
@@ -381,6 +390,17 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
           <h3><span id="rateTitleText">저축률</span> <span class="tag" id="rateTag">저축÷수입</span></h3>
           <div class="chart-wrap"><canvas id="rateChart"></canvas></div>
           <div class="realestate-list hidden" id="realEstateList"></div>
+        </div>
+      </div>
+
+      <div class="panel-grid">
+        <div class="panel">
+          <h3><span id="savedTitle">체험단 절약</span> <span class="tag" id="savedTag"></span></h3>
+          <div class="chart-wrap"><canvas id="savedChart"></canvas></div>
+        </div>
+        <div class="panel">
+          <h3>절약 내역</h3>
+          <div class="saved-list" id="savedList"></div>
         </div>
       </div>
 
@@ -535,7 +555,7 @@ footer{max-width:1180px; margin:0 auto; padding:10px 24px; color:var(--muted-2);
 
 <footer>구글 시트 원본 데이터를 실시간으로 불러옵니다 · 브라우저 로컬에만 캐시됩니다</footer>
 
-<script src="config.js?v=20261120e"></script>
-<script src="app.js?v=20261120e"></script>
+<script src="config.js?v=20261120f"></script>
+<script src="app.js?v=20261120f"></script>
 </body>
 </html>
